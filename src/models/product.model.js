@@ -6,6 +6,19 @@ const productSchema = new mongoose.Schema(
     name: { type: String, required: true },
     slug: { type: String, required: true, unique: true },
 
+    media: [
+      {
+        type: {
+          type: String,
+          enum: ["image", "video", "model"],
+        },
+        url: String,
+        public_id: String,
+        format: String,
+        bytes: Number,
+      },
+    ],
+
     categories: [
       {
         type: mongoose.Schema.Types.ObjectId,

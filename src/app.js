@@ -16,6 +16,7 @@ const authRoutes = require("./routes/auth.routes");
 const adminRoutes = require("./routes/admin.routes");
 const adminCategoryRoutes = require("./routes/admin.category.routes");
 const publicCategoryRoutes = require("./routes/public.category.routes");
+const adminProductRoutes = require("./routes/admin.products.routes");
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
 app.use("/api/categories", publicCategoryRoutes);
+app.use("/api/admin/products", adminProductRoutes);
 
 app.get("/", (req, res) => {
   res.send("Zenkai Backend Running");
