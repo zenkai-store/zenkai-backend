@@ -17,6 +17,7 @@ const adminRoutes = require("./routes/admin.routes");
 const adminCategoryRoutes = require("./routes/admin.category.routes");
 const publicCategoryRoutes = require("./routes/public.category.routes");
 const adminProductRoutes = require("./routes/admin.products.routes");
+const expensesRoutes = require("./routes/admin.expense.routes");
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
 app.use("/api/categories", publicCategoryRoutes);
 app.use("/api/admin/products", adminProductRoutes);
+app.use("/api/admin/expenses", expensesRoutes);
 
 app.get("/", (req, res) => {
   res.send("Zenkai Backend Running");

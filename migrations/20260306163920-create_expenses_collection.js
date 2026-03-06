@@ -1,24 +1,38 @@
 module.exports = {
-  /**
-   * @param db {import('mongodb').Db}
-   * @param client {import('mongodb').MongoClient}
-   * @returns {Promise<void>}
-   */
-  async up(db, client) {
-    // TODO write your migration here.
-    // See https://github.com/seppevs/migrate-mongo/#creating-a-new-migration-script
-    // Example:
-    // await db.collection('albums').updateOne({artist: 'The Beatles'}, {$set: {blacklisted: true}});
+  async up(db) {
+    const collections = await db.listCollections().toArray();
+    const names = collections.map((c) => c.name);
+
+    /**
+     * =========================
+     * EXPENSES COLLECTION
+     * =========================
+     */
+
+    if (!names.includes("expenses")) {
+      await db.createCollection("expenses");
+    }
+
+    await db
+      .collection("expenses")
+      .createIndexes([
+        { key: { title: 1 } },
+        { key: { category: 1 } },
+        { key: { amount: 1 } },
+        { key: { expenseDate: -1 } },
+        { key: { createdBy: 1 } },
+        { key: { createdAt: -1 } },
+      ]);
+
+    console.log("Expenses collection created successfully.");
   },
 
-  /**
-   * @param db {import('mongodb').Db}
-   * @param client {import('mongodb').MongoClient}
-   * @returns {Promise<void>}
-   */
-  async down(db, client) {
-    // TODO write the statements to rollback your migration (if possible)
-    // Example:
-    // await db.collection('albums').updateOne({artist: 'The Beatles'}, {$set: {blacklisted: false}});
-  }
+  async down(db) {
+    await db
+      .collection("expenses")
+      .drop()
+      .catch(() => {});
+
+    console.log("Expenses collection dropped.");
+  },
 };
