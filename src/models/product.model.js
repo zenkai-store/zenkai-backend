@@ -6,18 +6,22 @@ const productSchema = new mongoose.Schema(
     name: { type: String, required: true },
     slug: { type: String, required: true, unique: true },
 
-    media: [
-      {
-        type: {
-          type: String,
-          enum: ["image", "video", "model"],
+    // Variant information moved to separate collection
+    hasVariants: { type: Boolean, default: true },
+
+    // Variant summary for quick display (cached data)
+    variantSummary: {
+      minPrice: { type: Number, default: 0 },
+      maxPrice: { type: Number, default: 0 },
+      totalQuantity: { type: Number, default: 0 },
+      availableColors: [
+        {
+          name: String,
+          code: String,
+          isActive: Boolean,
         },
-        url: String,
-        public_id: String,
-        format: String,
-        bytes: Number,
-      },
-    ],
+      ],
+    },
 
     categories: [
       {
@@ -25,8 +29,6 @@ const productSchema = new mongoose.Schema(
         ref: "Category",
       },
     ],
-
-    quantity: { type: Number, default: 0 },
 
     description: [
       {
@@ -45,14 +47,6 @@ const productSchema = new mongoose.Schema(
       },
     ],
 
-    pricing: {
-      costPrice: Number,
-      marginalPrice: Number,
-      sellingPrice: Number,
-      onSalePrice: Number,
-    },
-
-    isOnSale: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
 
     createdBy: {
@@ -67,5 +61,10 @@ const productSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+// Indexes for better performance
+productSchema.index({ variantSummary: 1 });
+productSchema.index({ "variantSummary.minPrice": 1 });
+productSchema.index({ "variantSummary.totalQuantity": 1 });
 
 module.exports = mongoose.model("Product", productSchema);
