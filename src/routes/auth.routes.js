@@ -52,14 +52,43 @@ router.get(
  * AUTH SUCCESS
  */
 router.get("/success", (req, res) => {
-  res.json({ message: "Login successful" });
+  // Instead of sending JSON, send an HTML page that will close the popup
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Authentication Successful</title>
+      <script>
+        window.opener.postMessage({ type: 'AUTH_SUCCESS' }, '${process.env.FRONTEND_URL || "http://localhost:3000"}');
+        window.close();
+      </script>
+    </head>
+    <body>
+      <h2>Login successful! You can close this window.</h2>
+    </body>
+    </html>
+  `);
 });
 
 /**
  * AUTH FAILURE
  */
 router.get("/failure", (req, res) => {
-  res.status(401).json({ message: "Login failed" });
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Authentication Failed</title>
+      <script>
+        window.opener.postMessage({ type: 'AUTH_FAILURE' }, '${process.env.FRONTEND_URL || "http://localhost:3000"}');
+        window.close();
+      </script>
+    </head>
+    <body>
+      <h2>Login failed. Please try again.</h2>
+    </body>
+    </html>
+  `);
 });
 
 /**
