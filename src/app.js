@@ -32,8 +32,10 @@ const app = express();
 
 app.use(
   cors({
-    origin: true,
+    origin: true, // Reflects the request origin (allows all)
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 app.use(helmet());
