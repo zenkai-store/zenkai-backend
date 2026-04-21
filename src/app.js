@@ -32,7 +32,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: true, // Reflects the request origin (allows all)
+    origin: (origin, callback) => callback(null, true),
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
