@@ -30,8 +30,8 @@ router.post("/login", async (req, res) => {
 
     res.cookie("adminToken", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: false,
+      sameSite: "lax",
       maxAge: 24 * 60 * 60 * 1000,
     });
 
