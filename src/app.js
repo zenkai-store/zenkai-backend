@@ -34,7 +34,9 @@ app.use(
   cors({
     origin: function (origin, callback) {
       const allowedOrigins = [
+        "https://localhost:5173",
         "http://localhost:5173",
+        "https://127.0.0.1:5173",
         "http://127.0.0.1:5173",
       ];
 
@@ -45,7 +47,7 @@ app.use(
       }
     },
     credentials: true,
-  })
+  }),
 );
 app.use(helmet());
 app.use(morgan("dev"));
