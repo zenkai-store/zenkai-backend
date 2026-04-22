@@ -27,6 +27,7 @@ const reviewRoutes = require("./routes/review.routes");
 const adminReviewRoutes = require("./routes/admin.review.routes");
 const adminOrderRoutes = require("./routes/admin.order.routes");
 const orderRoutes = require("./routes/order.routes");
+const adminCustomerRoutes = require("./routes/admin.customer.routes");
 
 const app = express();
 
@@ -71,6 +72,7 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/admin/reviews", adminReviewRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/admin/orders", adminOrderRoutes);
+app.use("/api/admin/customers", adminCustomerRoutes);
 
 app.get("/", (req, res) => {
   res.send("Zenkai Backend Running");
