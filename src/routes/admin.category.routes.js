@@ -159,4 +159,27 @@ router.delete("/:id", adminAuth, async (req, res) => {
   }
 });
 
+/**
+ * LIST ALL CATEGORIES (Public)
+ * Accessible to everyone - no authentication required
+ */
+router.get("/", async (req, res) => {
+  try {
+    const categories = await Category.find({ isActive: true })
+      .sort({ displayOrder: 1, name: 1 })
+      .select("name slug description image displayOrder");
+
+    res.json({
+      success: true,
+      data: categories,
+    });
+  } catch (err) {
+    console.log("Error fetching categories:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch categories",
+    });
+  }
+});
+
 module.exports = router;
