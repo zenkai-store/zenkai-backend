@@ -327,7 +327,25 @@ router.put("/:id/variants/:variantId", async (req, res) => {
 
     // Update variant fields
     if (color) variant.color = color;
-    if (pricing) variant.pricing = pricing;
+    if (pricing) {
+      variant.pricing = {
+        costPrice: pricing.costPrice ?? variant.pricing.costPrice ?? 0,
+        marginalPrice:
+          pricing.marginalPrice ?? variant.pricing.marginalPrice ?? 0,
+        marketPrice:
+          pricing.marketPrice ??
+          variant.pricing.marketPrice ??
+          variant.pricing.sellingPrice ??
+          0,
+        sellingPrice: pricing.sellingPrice ?? variant.pricing.sellingPrice ?? 0,
+        onSalePrice:
+          pricing.onSalePrice !== undefined
+            ? pricing.onSalePrice
+            : (variant.pricing.onSalePrice ?? null),
+      };
+
+      variant.markModified("pricing");
+    }
     if (quantity !== undefined) variant.quantity = quantity;
     if (media) variant.media = media;
     if (isActive !== undefined) variant.isActive = isActive;

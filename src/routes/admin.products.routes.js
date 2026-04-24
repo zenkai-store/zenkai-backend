@@ -72,8 +72,25 @@ const validateVariantData = (variantData) => {
     errors.push("Selling price is required for variant");
   }
 
+  if (!variantData.pricing || !variantData.pricing.marketPrice) {
+    errors.push("Market price is required for variant");
+  }
+
   if (variantData.pricing && variantData.pricing.sellingPrice < 0) {
     errors.push("Selling price cannot be negative");
+  }
+
+  if (variantData.pricing && variantData.pricing.marketPrice < 0) {
+    errors.push("Market price cannot be negative");
+  }
+
+  if (
+    variantData.pricing &&
+    variantData.pricing.onSalePrice !== undefined &&
+    variantData.pricing.onSalePrice !== null &&
+    variantData.pricing.onSalePrice < 0
+  ) {
+    errors.push("On-sale price cannot be negative");
   }
 
   if (variantData.quantity !== undefined && variantData.quantity < 0) {
@@ -610,7 +627,33 @@ router.put(
 
       // Update variant fields
       if (updateData.color) variant.color = updateData.color;
-      if (updateData.pricing) variant.pricing = updateData.pricing;
+      if (updateData.pricing) {
+        // Merge pricing data to preserve existing fields not included in update
+        variant.pricing = {
+          costPrice:
+            updateData.pricing.costPrice ?? variant.pricing.costPrice ?? 0,
+          marginalPrice:
+            updateData.pricing.marginalPrice ??
+            variant.pricing.marginalPrice ??
+            0,
+          marketPrice:
+            updateData.pricing.marketPrice ??
+            variant.pricing.marketPrice ??
+            variant.pricing.sellingPrice ??
+            0,
+          sellingPrice:
+            updateData.pricing.sellingPrice ??
+            variant.pricing.sellingPrice ??
+            0,
+          onSalePrice:
+            updateData.pricing.onSalePrice !== undefined
+              ? updateData.pricing.onSalePrice
+              : (variant.pricing.onSalePrice ?? null),
+        };
+
+        // Mark the pricing path as modified explicitly
+        variant.markModified("pricing");
+      }
       if (updateData.quantity !== undefined)
         variant.quantity = updateData.quantity;
       if (updateData.media) variant.media = updateData.media;
@@ -1209,11 +1252,16 @@ router.post("/bulk-variant-update", adminAuth, async (req, res) => {
     switch (updateType) {
       case "price":
         for (const update of updates) {
-          if (!update.variantId || !update.sellingPrice) {
+          if (
+            !update.variantId ||
+            !update.sellingPrice ||
+            !update.marketPrice
+          ) {
             await session.abortTransaction();
             return res.status(400).json({
               success: false,
-              message: "Each update must have variantId and sellingPrice",
+              message:
+                "Each update must have variantId, marketPrice, and sellingPrice",
             });
           }
 
@@ -1222,9 +1270,10 @@ router.post("/bulk-variant-update", adminAuth, async (req, res) => {
               filter: { _id: update.variantId },
               update: {
                 $set: {
+                  "pricing.marketPrice": update.marketPrice,
                   "pricing.sellingPrice": update.sellingPrice,
                   "pricing.onSalePrice": update.onSalePrice || null,
-                  isOnSale: !!update.onSalePrice,
+                  isOnSale: !!(update.onSalePrice && update.onSalePrice > 0),
                   updatedBy: req.admin.id,
                   updatedAt: new Date(),
                 },

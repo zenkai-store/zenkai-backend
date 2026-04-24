@@ -36,6 +36,7 @@ const productVariantSchema = new mongoose.Schema(
     pricing: {
       costPrice: { type: Number, default: 0, min: 0 },
       marginalPrice: { type: Number, default: 0, min: 0 },
+      marketPrice: { type: Number, required: true, min: 0 },
       sellingPrice: { type: Number, required: true, min: 0 },
       onSalePrice: { type: Number, min: 0, default: null },
     },
@@ -80,6 +81,24 @@ productVariantSchema.virtual("currentPrice").get(function () {
     return this.pricing.onSalePrice;
   }
   return this.pricing.sellingPrice;
+});
+
+// Virtual for display purposes (what to show to users)
+productVariantSchema.virtual("displayPrice").get(function () {
+  return {
+    marketPrice: this.pricing.marketPrice,
+    sellingPrice: this.pricing.sellingPrice,
+    onSalePrice: this.pricing.isOnSale ? this.pricing.onSalePrice : null,
+    isOnSale: this.pricing.isOnSale,
+    discountPercentage:
+      this.pricing.isOnSale && this.pricing.onSalePrice
+        ? Math.round(
+            ((this.pricing.marketPrice - this.pricing.onSalePrice) /
+              this.pricing.marketPrice) *
+              100,
+          )
+        : 0,
+  };
 });
 
 // Method to check if in stock
