@@ -91,12 +91,18 @@ router.get("/failure", (req, res) => {
   `);
 });
 
-/**
- * LOGOUT
- */
 router.post("/logout", (req, res) => {
-  res.clearCookie("token");
-  res.json({ message: "Logged out successfully" });
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    path: "/",
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Logged out successfully",
+  });
 });
 
 /**

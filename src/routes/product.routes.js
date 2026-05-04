@@ -94,6 +94,7 @@ const formatProductForListing = async (product) => {
     pricing: product.variantSummary
       ? {
           sellingPrice: product.variantSummary.minPrice,
+          marketPrice: product.variantSummary.marketPrice,
           maxPrice: product.variantSummary.maxPrice,
         }
       : null,
@@ -579,4 +580,237 @@ router.get("/slug/:slug", async (req, res) => {
   }
 });
 
+/**
+ * GET: /api/products/category/:categoryId
+ * FILTER PRODUCTS BY A SPECIFIC CATEGORY (active only)
+ * Returns formatted product listing with variant info, single image, pricing, and quantity
+ * QUERY: ?page=1&limit=10&sortBy=createdAt&sortOrder=desc
+ */
+router.get("/category/:categoryId", async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+    const { page, limit, sortBy = "createdAt", sortOrder = "desc" } = req.query;
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid category ID format",
+      });
+    }
+
+    // Validate category exists and is active
+    const category = await Category.findById(categoryId).lean();
+    if (!category || !category.isActive) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+      });
+    }
+
+    const { page: pageNum, limit: limitNum, skip } = getPagination(page, limit);
+
+    // Build sort object
+    const sortOptions = {};
+    const allowedSortFields = ["createdAt", "name", "displayOrder"];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    sortOptions[sortField] = sortOrder === "asc" ? 1 : -1;
+
+    const query = {
+      isActive: true,
+      categories: categoryId,
+    };
+
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .populate("categories", "name slug")
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      Product.countDocuments(query),
+    ]);
+
+    // Format products with variant information
+    const formattedProducts = await Promise.all(
+      products.map(async (product) => {
+        try {
+          // Get all active variants for this product to calculate total quantity
+          const activeVariants = await ProductVariant.find({
+            productId: product._id,
+            isActive: true,
+          })
+            .sort({ "pricing.sellingPrice": 1 })
+            .lean();
+
+          // Get cheapest active variant with stock for pricing display
+          const cheapestVariant =
+            activeVariants.find((v) => v.quantity > 0) || activeVariants[0];
+
+          // Default variant as fallback
+          const defaultVariant =
+            activeVariants.find((v) => v.isDefault) || activeVariants[0];
+
+          // Calculate total quantity across all variants
+          const totalQuantity = activeVariants.reduce(
+            (sum, variant) => sum + (variant.quantity || 0),
+            0,
+          );
+
+          // Get single image from default variant or cheapest variant
+          let productImage = null;
+
+          // Try default variant first, then cheapest variant
+          const imageSourceVariant = defaultVariant || cheapestVariant;
+
+          if (
+            imageSourceVariant?.media &&
+            Array.isArray(imageSourceVariant.media) &&
+            imageSourceVariant.media.length > 0
+          ) {
+            const imageItem = imageSourceVariant.media.find(
+              (m) => m && m.type === "image" && m.url,
+            );
+            if (imageItem) {
+              productImage = {
+                url: imageItem.url,
+                alt: imageItem.alt || product.name || "",
+              };
+            }
+          }
+
+          // If no image found, try any variant
+          if (!productImage) {
+            for (const variant of activeVariants) {
+              if (
+                variant.media &&
+                Array.isArray(variant.media) &&
+                variant.media.length > 0
+              ) {
+                const imageItem = variant.media.find(
+                  (m) => m && m.type === "image" && m.url,
+                );
+                if (imageItem) {
+                  productImage = {
+                    url: imageItem.url,
+                    alt: imageItem.alt || product.name || "",
+                  };
+                  break;
+                }
+              }
+            }
+          }
+
+          // Build pricing response with only required fields
+          const pricing = defaultVariant
+            ? {
+                marketPrice:
+                  defaultVariant.pricing?.marketPrice ||
+                  defaultVariant.pricing?.sellingPrice ||
+                  0,
+                sellingPrice: defaultVariant.pricing?.sellingPrice || 0,
+                onSalePrice: defaultVariant.isOnSale
+                  ? defaultVariant.pricing?.onSalePrice || null
+                  : null,
+              }
+            : null;
+
+          // Safe description truncation
+          let truncatedDescription = null;
+          if (product.description && typeof product.description === "string") {
+            truncatedDescription =
+              product.description.length > 200
+                ? product.description.substring(0, 200) + "..."
+                : product.description;
+          }
+
+          // Determine stock status
+          let stockStatus = "out_of_stock";
+          if (totalQuantity > 10) {
+            stockStatus = "in_stock";
+          } else if (totalQuantity > 0) {
+            stockStatus = "low_stock";
+          }
+
+          return {
+            _id: product._id,
+            productId: product.productId,
+            name: product.name,
+            slug: product.slug,
+            description: truncatedDescription,
+            image: productImage,
+            pricing,
+            quantity: totalQuantity,
+            stockStatus,
+            variantCount: activeVariants.length,
+            categories: product.categories,
+            hasVariants: product.hasVariants || false,
+            isOnSale: defaultVariant?.isOnSale || false,
+            createdAt: product.createdAt,
+          };
+        } catch (variantErr) {
+          console.error(
+            `Error processing product ${product._id}:`,
+            variantErr.message,
+          );
+
+          // Safe description truncation even in error case
+          let truncatedDescription = null;
+          if (product.description && typeof product.description === "string") {
+            truncatedDescription =
+              product.description.length > 200
+                ? product.description.substring(0, 200) + "..."
+                : product.description;
+          }
+
+          // Return product without variant info on error
+          return {
+            _id: product._id,
+            productId: product.productId,
+            name: product.name,
+            slug: product.slug,
+            description: truncatedDescription,
+            image: null,
+            pricing: null,
+            quantity: 0,
+            stockStatus: "out_of_stock",
+            variantCount: 0,
+            categories: product.categories,
+            hasVariants: product.hasVariants || false,
+            isOnSale: false,
+            createdAt: product.createdAt,
+          };
+        }
+      }),
+    );
+
+    const totalPages = Math.ceil(total / limitNum);
+
+    res.json({
+      success: true,
+      data: formattedProducts,
+      category: {
+        _id: category._id,
+        name: category.name,
+        slug: category.slug,
+        description: category.description,
+      },
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1,
+      },
+    });
+  } catch (err) {
+    console.error("Error in filtering by category: ", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch products by category",
+      error: process.env.NODE_ENV === "development" ? err.message : undefined,
+    });
+  }
+});
 module.exports = router;

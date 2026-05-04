@@ -101,6 +101,96 @@ const validateVariantData = (variantData) => {
 };
 
 /**
+ * Helper: Format product for listing with variant info
+ */
+const formatProductForListing = async (product) => {
+  // Get cheapest variant for listing display
+  const cheapestVariant = await ProductVariant.findOne({
+    productId: product._id,
+    quantity: { $gt: 0 },
+  })
+    .sort({ "pricing.sellingPrice": 1 })
+    .lean();
+
+  let variantImage = null;
+  if (
+    cheapestVariant &&
+    cheapestVariant.media &&
+    cheapestVariant.media.length
+  ) {
+    const imageItem = cheapestVariant.media.find((m) => m.type === "image");
+    if (imageItem) {
+      variantImage = {
+        url: imageItem.url,
+        type: "image",
+      };
+    }
+  }
+
+  return {
+    _id: product._id,
+    productId: product.productId,
+    name: product.name,
+    slug: product.slug,
+    media: variantImage,
+    hasVariants: product.hasVariants,
+    variantSummary: product.variantSummary,
+    pricing: product.variantSummary
+      ? {
+          sellingPrice: product.variantSummary.minPrice,
+          maxPrice: product.variantSummary.maxPrice,
+        }
+      : null,
+  };
+};
+
+/**
+ * GET: /api/admin/products
+ * PAGINATED LIST OF ALL ACTIVE/INACTIVE PRODUCTS
+ */
+router.get("/", async (req, res) => {
+  try {
+    const { page, limit } = req.query;
+    const { page: pageNum, limit: limitNum, skip } = getPagination(page, limit);
+
+    const query = {};
+
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .populate("categories", "name slug")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      Product.countDocuments(query),
+    ]);
+
+    // Format products with variant information
+    const formattedProducts = await Promise.all(
+      products.map((product) => formatProductForListing(product)),
+    );
+
+    const totalPages = Math.ceil(total / limitNum);
+
+    res.json({
+      success: true,
+      data: formattedProducts,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1,
+      },
+    });
+  } catch (err) {
+    console.error("Error in product listing: ", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
  * CREATE PRODUCT WITH DEFAULT VARIANT
  * POST /api/admin/products
  */
