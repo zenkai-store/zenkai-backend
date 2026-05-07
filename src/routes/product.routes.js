@@ -4,8 +4,26 @@ const mongoose = require("mongoose");
 const Product = require("../models/product.model");
 const ProductVariant = require("../models/productVariant.model");
 const Category = require("../models/category.model");
+const Review = require("../models/review.model");
+
+const jwt = require("jsonwebtoken");
+const Wishlist = require("../models/wishlist.model");
 
 const router = express.Router();
+
+// ✅ ADD optionalAuth RIGHT HERE — after imports, before any route or helper
+const optionalAuth = (req, res, next) => {
+  try {
+    const token = req.cookies?.token;
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = decoded;
+    }
+  } catch (_) {
+    // invalid/expired token — treat as unauthenticated, don't block
+  }
+  next();
+};
 
 /**
  * PAGINATION FUNCTION HELPER
@@ -58,7 +76,7 @@ const updateProductVariantSummary = async (productId) => {
 /**
  * Helper: Format product for listing with variant info
  */
-const formatProductForListing = async (product) => {
+const formatProductForListing = async (product, averageReview = 0, isWishlisted = false) => { //✅ added
   // Get cheapest variant for listing display
   const cheapestVariant = await ProductVariant.findOne({
     productId: product._id,
@@ -93,11 +111,13 @@ const formatProductForListing = async (product) => {
     variantSummary: product.variantSummary,
     pricing: product.variantSummary
       ? {
-          sellingPrice: product.variantSummary.minPrice,
-          marketPrice: product.variantSummary.marketPrice,
-          maxPrice: product.variantSummary.maxPrice,
-        }
+        sellingPrice: product.variantSummary.minPrice,
+        marketPrice: product.variantSummary.marketPrice,
+        maxPrice: product.variantSummary.maxPrice,
+      }
       : null,
+    averageReview, //✅ added
+    isWishlisted,    // ✅ added
   };
 };
 
@@ -105,7 +125,7 @@ const formatProductForListing = async (product) => {
  * GET: /api/products
  * PAGINATED LIST OF ALL ACTIVE PRODUCTS
  */
-router.get("/", async (req, res) => {
+router.get("/", optionalAuth, async (req, res) => { // ✅ optionalAuth added
   try {
     const { page, limit } = req.query;
     const { page: pageNum, limit: limitNum, skip } = getPagination(page, limit);
@@ -122,10 +142,53 @@ router.get("/", async (req, res) => {
       Product.countDocuments(query),
     ]);
 
-    // Format products with variant information
+    // ✅ Batch fetch average ratings — one aggregation, no N+1
+    const productIds = products.map((p) => p._id);
+    const reviewAggregation = await Review.aggregate([
+      { $match: { productId: { $in: productIds }, isActive: true } },
+      {
+        $group: {
+          _id: "$productId",
+          avg: { $avg: "$rating" },
+        },
+      },
+    ]);
+
+    // ✅ Build lookup map: productId string → rounded average
+    const reviewMap = {};
+    reviewAggregation.forEach(({ _id, avg }) => {
+      reviewMap[_id.toString()] = Math.round(avg * 10) / 10;
+    });
+
+
+    // ✅ Task 2: Batch fetch wishlisted product IDs — one query, no N+1
+    // Only runs if user is authenticated, otherwise wishlistedSet stays empty
+    const wishlistedSet = new Set();
+    if (req.user?.id) {
+      const wishlistItems = await Wishlist.find({
+        userId: req.user.id,
+        productId: { $in: productIds },
+      })
+        .select("productId")
+        .lean();
+
+      wishlistItems.forEach((item) => {
+        wishlistedSet.add(item.productId.toString());
+      });
+    }
+
+    // ✅ Pass averageReview per product into formatter, fallback 0
     const formattedProducts = await Promise.all(
-      products.map((product) => formatProductForListing(product)),
+      products.map((product) =>
+        formatProductForListing(
+          product,
+          reviewMap[product._id.toString()] ?? 0,
+          wishlistedSet.has(product._id.toString()),
+        ),
+      ),
     );
+
+
 
     const totalPages = Math.ceil(total / limitNum);
 
@@ -704,15 +767,15 @@ router.get("/category/:categoryId", async (req, res) => {
           // Build pricing response with only required fields
           const pricing = defaultVariant
             ? {
-                marketPrice:
-                  defaultVariant.pricing?.marketPrice ||
-                  defaultVariant.pricing?.sellingPrice ||
-                  0,
-                sellingPrice: defaultVariant.pricing?.sellingPrice || 0,
-                onSalePrice: defaultVariant.isOnSale
-                  ? defaultVariant.pricing?.onSalePrice || null
-                  : null,
-              }
+              marketPrice:
+                defaultVariant.pricing?.marketPrice ||
+                defaultVariant.pricing?.sellingPrice ||
+                0,
+              sellingPrice: defaultVariant.pricing?.sellingPrice || 0,
+              onSalePrice: defaultVariant.isOnSale
+                ? defaultVariant.pricing?.onSalePrice || null
+                : null,
+            }
             : null;
 
           // Safe description truncation
