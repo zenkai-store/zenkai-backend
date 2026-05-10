@@ -8,6 +8,7 @@ const Review = require("../models/review.model");
 
 const jwt = require("jsonwebtoken");
 const Wishlist = require("../models/wishlist.model");
+const { getRecommendations } = require("../services/recommendation.service");
 
 const router = express.Router();
 
@@ -484,6 +485,63 @@ router.delete("/:id/variants/:variantId", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHANGES TO: src/routes/product.routes.js
+//
+// 1. Add this require() at the top of the file with the other imports:
+//
+//      const { getRecommendations } = require("../services/recommendation.service");
+//
+// 2. Paste the route below ABOVE the existing /search route.
+//    It must come before /:id to prevent Express matching "recommend" as an id.
+//
+// Correct order in the file after this change:
+//   GET /recommend/:productId   ← add here
+//   GET /search
+//   GET /:id/variants
+//   GET /:id/variants/:variantId
+//   POST /:id/variants
+//   PUT /:id/variants/:variantId
+//   DELETE /:id/variants/:variantId
+//   GET /:id                    ← must stay last
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET: /api/products/recommend/:productId
+ * Weighted product recommendation engine.
+ * Returns 8 scored products based on category, rating, freshness, stock, and price.
+ * Supports authenticated (isWishlisted per user) and unauthenticated (isWishlisted: false).
+ */
+router.get("/recommend/:productId", optionalAuth, async (req, res) => {
+  try {
+    const userId = req.user?.id || null;
+    const recommendations = await getRecommendations(req.params.productId, userId);
+
+    return res.status(200).json({
+      success: true,
+      count:   recommendations.length,
+      data:    recommendations,
+    });
+  } catch (error) {
+    console.error("Error in product recommendations:", error.message);
+
+    const status =
+      error.message === "Product not found" ||
+      error.message === "Invalid product ID"
+        ? 404
+        : 500;
+
+    return res.status(status).json({
+      success: false,
+      message: error.message || "Failed to fetch recommendations",
+    });
+  }
+});
+
+
 
 /**
  * GET: /api/products/search
