@@ -6,7 +6,7 @@ const passport = require("./config/passport");
 const cookieParser = require("cookie-parser");
 require("dotenv").config();
 
-require("./models/user.model"); 
+require("./models/user.model");
 require("./models/admin.model");
 require("./models/adminActivity.model");
 require("./models/category.model");
@@ -41,6 +41,7 @@ app.use(
         "http://localhost:5173",
         "https://127.0.0.1:5173",
         "http://127.0.0.1:5173",
+        "https://zenkai-frontend-nine.vercel.app",
       ];
 
       if (!origin || allowedOrigins.includes(origin)) {
@@ -66,7 +67,7 @@ app.use("/api/categories", publicCategoryRoutes);
 app.use("/api/admin/products", adminProductRoutes);
 app.use("/api/admin/expenses", expensesRoutes);
 app.use("/api/wishlist", wishlistRoutes);
-app.use("/api/cart", cartRoutes); 
+app.use("/api/cart", cartRoutes);
 app.use("/api/address", addressRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/products", productRoutes);
