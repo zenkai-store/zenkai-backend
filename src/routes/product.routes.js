@@ -625,7 +625,43 @@ router.get("/search", async (req, res) => {
  * GET: /api/products/:id
  * FETCH A SINGLE ACTIVE PRODUCT WITH ITS VARIANTS
  */
-router.get("/:id", async (req, res) => {
+// router.get("/:id", async (req, res) => {
+//   try {
+//     const product = await Product.findOne({
+//       _id: req.params.id,
+//       isActive: true,
+//     })
+//       .populate("categories", "name slug")
+//       .lean();
+
+//     if (!product) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Product not found" });
+//     }
+
+//     // Fetch all active variants
+//     const variants = await ProductVariant.find({
+//       productId: product._id,
+//       isActive: true,
+//     })
+//       .sort({ displayOrder: 1, isDefault: -1 })
+//       .lean();
+
+//     res.json({
+//       success: true,
+//       data: {
+//         ...product,
+//         variants,
+//       },
+//     });
+//   } catch (err) {
+//     console.error("Error in fetching product by id: ", err);
+//     res.status(500).json({ success: false, message: err.message });
+//   }
+// });
+
+router.get("/:id", optionalAuth, async (req, res) => {
   try {
     const product = await Product.findOne({
       _id: req.params.id,
@@ -648,11 +684,32 @@ router.get("/:id", async (req, res) => {
       .sort({ displayOrder: 1, isDefault: -1 })
       .lean();
 
+    // Attach isWishlisted per variant for authenticated users
+    const variantIds = variants.map((v) => v._id);
+    const wishlistedVariantSet = new Set();
+    if (req.user?.id) {
+      const wishlistItems = await Wishlist.find({
+        userId: req.user.id,
+        productId: product._id,
+        variantId: { $in: variantIds },
+      })
+        .select("variantId")
+        .lean();
+      wishlistItems.forEach((item) => {
+        wishlistedVariantSet.add(item.variantId.toString());
+      });
+    }
+
+    const variantsWithWishlist = variants.map((v) => ({
+      ...v,
+      isWishlisted: wishlistedVariantSet.has(v._id.toString()),
+    }));
+
     res.json({
       success: true,
       data: {
         ...product,
-        variants,
+        variants: variantsWithWishlist,
       },
     });
   } catch (err) {
