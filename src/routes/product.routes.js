@@ -95,7 +95,13 @@ const formatProductForListing = async (product, averageReview = 0, isWishlisted 
   ) {
     const imageItem = cheapestVariant.media.find((m) => m.type === "image");
     if (imageItem) {
+      // variantImage = {
+      //   url: imageItem.url,
+      //   type: "image",
+      // };
+      // ✅ Fix
       variantImage = {
+        variantId: cheapestVariant._id,
         url: imageItem.url,
         type: "image",
       };
@@ -520,17 +526,51 @@ router.get("/recommend/:productId", optionalAuth, async (req, res) => {
     const userId = req.user?.id || null;
     const recommendations = await getRecommendations(req.params.productId, userId);
 
+    // Batch fetch cheapest in-stock variant per product — no N+1
+    const productIds = recommendations.map((r) => r._id);
+    const variantDocs = await ProductVariant.find({
+      productId: { $in: productIds },
+      isActive: true,
+      quantity: { $gt: 0 },
+    })
+      .sort({ "pricing.sellingPrice": 1 })
+      .select("_id productId media")
+      .lean();
+
+    // Map: productId → cheapest variant (sorted above, keep first)
+    const variantMap = {};
+    variantDocs.forEach((v) => {
+      const key = v.productId.toString();
+      if (!variantMap[key]) variantMap[key] = v;
+    });
+
+    // Inject variantId into media for each recommendation
+    const enriched = recommendations.map((rec) => {
+      const variant = variantMap[rec._id.toString()];
+      if (rec.media && variant) {
+        return {
+          ...rec,
+          media: {
+            variantId: variant._id,
+            url: rec.media.url,
+            type: rec.media.type,
+          },
+        };
+      }
+      return rec;
+    });
+
     return res.status(200).json({
       success: true,
-      count:   recommendations.length,
-      data:    recommendations,
+      count: enriched.length,
+      data: enriched,
     });
   } catch (error) {
     console.error("Error in product recommendations:", error.message);
 
     const status =
       error.message === "Product not found" ||
-      error.message === "Invalid product ID"
+        error.message === "Invalid product ID"
         ? 404
         : 500;
 
@@ -685,24 +725,41 @@ router.get("/:id", optionalAuth, async (req, res) => {
       .lean();
 
     // Attach isWishlisted per variant for authenticated users
-    const variantIds = variants.map((v) => v._id);
-    const wishlistedVariantSet = new Set();
+    // const variantIds = variants.map((v) => v._id);
+    // const wishlistedVariantSet = new Set();
+    // if (req.user?.id) {
+    //   const wishlistItems = await Wishlist.find({
+    //     userId: req.user.id,
+    //     productId: product._id,
+    //     variantId: { $in: variantIds },
+    //   })
+    //     .select("variantId")
+    //     .lean();
+    //   wishlistItems.forEach((item) => {
+    //     wishlistedVariantSet.add(item.variantId.toString());
+    //   });
+    // }
+
+    // const variantsWithWishlist = variants.map((v) => ({
+    //   ...v,
+    //   isWishlisted: wishlistedVariantSet.has(v._id.toString()),
+    // }));
+    // Wishlist entries are saved at product level (no variantId),
+    // so query by productId only and apply result to all variants.
+    let isProductWishlisted = false;
     if (req.user?.id) {
-      const wishlistItems = await Wishlist.find({
+      const wishlistItem = await Wishlist.findOne({
         userId: req.user.id,
         productId: product._id,
-        variantId: { $in: variantIds },
       })
-        .select("variantId")
+        .select("_id")
         .lean();
-      wishlistItems.forEach((item) => {
-        wishlistedVariantSet.add(item.variantId.toString());
-      });
+      isProductWishlisted = !!wishlistItem;
     }
 
     const variantsWithWishlist = variants.map((v) => ({
       ...v,
-      isWishlisted: wishlistedVariantSet.has(v._id.toString()),
+      isWishlisted: isProductWishlisted,
     }));
 
     res.json({
@@ -851,6 +908,7 @@ router.get("/category/:categoryId", async (req, res) => {
             );
             if (imageItem) {
               productImage = {
+                variantId: variant._id,
                 url: imageItem.url,
                 alt: imageItem.alt || product.name || "",
               };
@@ -870,6 +928,7 @@ router.get("/category/:categoryId", async (req, res) => {
                 );
                 if (imageItem) {
                   productImage = {
+                    variantId: imageSourceVariant._id,
                     url: imageItem.url,
                     alt: imageItem.alt || product.name || "",
                   };
