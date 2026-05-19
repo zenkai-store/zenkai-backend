@@ -77,7 +77,12 @@ const updateProductVariantSummary = async (productId) => {
 /**
  * Helper: Format product for listing with variant info
  */
-const formatProductForListing = async (product, averageReview = 0, isWishlisted = false) => { //✅ added
+const formatProductForListing = async (
+  product,
+  averageReview = 0,
+  isWishlisted = false,
+) => {
+  //✅ added
   // Get cheapest variant for listing display
   const cheapestVariant = await ProductVariant.findOne({
     productId: product._id,
@@ -118,13 +123,13 @@ const formatProductForListing = async (product, averageReview = 0, isWishlisted 
     variantSummary: product.variantSummary,
     pricing: product.variantSummary
       ? {
-        sellingPrice: product.variantSummary.minPrice,
-        marketPrice: product.variantSummary.marketPrice,
-        maxPrice: product.variantSummary.maxPrice,
-      }
+          sellingPrice: product.variantSummary.minPrice,
+          marketPrice: product.variantSummary.marketPrice,
+          maxPrice: product.variantSummary.maxPrice,
+        }
       : null,
     averageReview, //✅ added
-    isWishlisted,    // ✅ added
+    isWishlisted, // ✅ added
   };
 };
 
@@ -132,7 +137,8 @@ const formatProductForListing = async (product, averageReview = 0, isWishlisted 
  * GET: /api/products
  * PAGINATED LIST OF ALL ACTIVE PRODUCTS
  */
-router.get("/", optionalAuth, async (req, res) => { // ✅ optionalAuth added
+router.get("/", optionalAuth, async (req, res) => {
+  // ✅ optionalAuth added
   try {
     const { page, limit } = req.query;
     const { page: pageNum, limit: limitNum, skip } = getPagination(page, limit);
@@ -167,7 +173,6 @@ router.get("/", optionalAuth, async (req, res) => { // ✅ optionalAuth added
       reviewMap[_id.toString()] = Math.round(avg * 10) / 10;
     });
 
-
     // ✅ Task 2: Batch fetch wishlisted product IDs — one query, no N+1
     // Only runs if user is authenticated, otherwise wishlistedSet stays empty
     const wishlistedSet = new Set();
@@ -194,8 +199,6 @@ router.get("/", optionalAuth, async (req, res) => { // ✅ optionalAuth added
         ),
       ),
     );
-
-
 
     const totalPages = Math.ceil(total / limitNum);
 
@@ -492,8 +495,6 @@ router.delete("/:id/variants/:variantId", async (req, res) => {
   }
 });
 
-
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CHANGES TO: src/routes/product.routes.js
 //
@@ -524,7 +525,10 @@ router.delete("/:id/variants/:variantId", async (req, res) => {
 router.get("/recommend/:productId", optionalAuth, async (req, res) => {
   try {
     const userId = req.user?.id || null;
-    const recommendations = await getRecommendations(req.params.productId, userId);
+    const recommendations = await getRecommendations(
+      req.params.productId,
+      userId,
+    );
 
     // Batch fetch cheapest in-stock variant per product — no N+1
     const productIds = recommendations.map((r) => r._id);
@@ -570,7 +574,7 @@ router.get("/recommend/:productId", optionalAuth, async (req, res) => {
 
     const status =
       error.message === "Product not found" ||
-        error.message === "Invalid product ID"
+      error.message === "Invalid product ID"
         ? 404
         : 500;
 
@@ -580,8 +584,6 @@ router.get("/recommend/:productId", optionalAuth, async (req, res) => {
     });
   }
 });
-
-
 
 /**
  * GET: /api/products/search
@@ -908,7 +910,7 @@ router.get("/category/:categoryId", async (req, res) => {
             );
             if (imageItem) {
               productImage = {
-                variantId: variant._id,
+                variantId: imageSourceVariant._id,
                 url: imageItem.url,
                 alt: imageItem.alt || product.name || "",
               };
@@ -941,15 +943,15 @@ router.get("/category/:categoryId", async (req, res) => {
           // Build pricing response with only required fields
           const pricing = defaultVariant
             ? {
-              marketPrice:
-                defaultVariant.pricing?.marketPrice ||
-                defaultVariant.pricing?.sellingPrice ||
-                0,
-              sellingPrice: defaultVariant.pricing?.sellingPrice || 0,
-              onSalePrice: defaultVariant.isOnSale
-                ? defaultVariant.pricing?.onSalePrice || null
-                : null,
-            }
+                marketPrice:
+                  defaultVariant.pricing?.marketPrice ||
+                  defaultVariant.pricing?.sellingPrice ||
+                  0,
+                sellingPrice: defaultVariant.pricing?.sellingPrice || 0,
+                onSalePrice: defaultVariant.isOnSale
+                  ? defaultVariant.pricing?.onSalePrice || null
+                  : null,
+              }
             : null;
 
           // Safe description truncation
