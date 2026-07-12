@@ -7,6 +7,17 @@ const User = require("../models/user.model");
 
 const router = express.Router();
 
+// Cookie settings helper
+const setUserTokenCookie = (res, token) => {
+  const isProduction = process.env.NODE_ENV === "production";
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: isProduction, // true only in production
+    sameSite: isProduction ? "none" : "lax",
+    maxAge: 180 * 24 * 60 * 60 * 1000, // 6 months
+  });
+};
+
 /**
  * GOOGLE LOGIN
  */
@@ -15,6 +26,7 @@ router.get(
   passport.authenticate("google", {
     scope: ["profile", "email"],
     session: false,
+    prompt: "select_account",
   }),
 );
 
@@ -37,15 +49,7 @@ router.get(
       { expiresIn: "180d" },
     );
 
-    res.cookie("token", token, {
-      httpOnly: true,
-      // secure: true, // set true in production with HTTPS
-      // sameSite: "none",
-      secure: false,
-      sameSite: "lax",
-
-      maxAge: 180 * 24 * 60 * 60 * 1000,
-    });
+    setUserTokenCookie(res, token);
 
     res.redirect("/api/auth/success");
   },
@@ -95,10 +99,11 @@ router.get("/failure", (req, res) => {
 });
 
 router.post("/logout", (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production";
   res.clearCookie("token", {
     httpOnly: true,
-    secure: true,
-    sameSite: "none",
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
     path: "/",
   });
 
@@ -171,12 +176,7 @@ router.post("/signup", async (req, res) => {
       { expiresIn: "180d" },
     );
 
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      maxAge: 180 * 24 * 60 * 60 * 1000,
-    });
+    setUserTokenCookie(res, token);
 
     return res.status(201).json({
       success: true,
@@ -231,12 +231,7 @@ router.post("/login", async (req, res) => {
       { expiresIn: "180d" },
     );
 
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      maxAge: 180 * 24 * 60 * 60 * 1000,
-    });
+    setUserTokenCookie(res, token);
 
     return res.json({
       success: true,
