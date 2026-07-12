@@ -34,7 +34,7 @@ router.get(
         role: req.user.role,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" },
+      { expiresIn: "180d" },
     );
 
     res.cookie("token", token, {
@@ -44,7 +44,7 @@ router.get(
       secure: false,
       sameSite: "lax",
 
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 180 * 24 * 60 * 60 * 1000,
     });
 
     res.redirect("/api/auth/success");
@@ -168,14 +168,14 @@ router.post("/signup", async (req, res) => {
         role: user.role,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" },
+      { expiresIn: "180d" },
     );
 
     res.cookie("token", token, {
       httpOnly: true,
       secure: true,
       sameSite: "none",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 180 * 24 * 60 * 60 * 1000,
     });
 
     return res.status(201).json({
@@ -228,14 +228,14 @@ router.post("/login", async (req, res) => {
         role: user.role,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" },
+      { expiresIn: "180d" },
     );
 
     res.cookie("token", token, {
       httpOnly: true,
       secure: true,
       sameSite: "none",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 180 * 24 * 60 * 60 * 1000,
     });
 
     return res.json({

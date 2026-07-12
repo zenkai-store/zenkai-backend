@@ -4,6 +4,7 @@ const Payment = require("../models/payment.model");
 const OrderStatusHistory = require("../models/orderStatusHistory.model");
 const ProductVariant = require("../models/productVariant.model");
 const CartService = require("./cart.service");
+const deliveryService = require("./delivery.service");
 
 class OrderService {
   /**
@@ -238,6 +239,18 @@ class OrderService {
       );
 
       await session.commitTransaction();
+
+      // Trigger shipment creation asynchronously (do not await to avoid delaying response)
+      setImmediate(() => {
+        deliveryService
+          .createShipmentForOrder(order._id, userId)
+          .catch((err) => {
+            console.error(
+              `Failed to create shipment for order ${order._id}:`,
+              err.message,
+            );
+          });
+      });
 
       return {
         order,
