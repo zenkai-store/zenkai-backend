@@ -30,6 +30,7 @@ const orderRoutes = require("./routes/order.routes");
 const adminCustomerRoutes = require("./routes/admin.customer.routes");
 const adminFeaturedRoutes = require("./routes/admin.featured.routes");
 const featuredRoutes = require("./routes/featured.routes");
+const adminShipmentRoutes = require("./routes/admin.shipment.routes");
 
 const app = express();
 
@@ -78,6 +79,7 @@ app.use("/api/admin/orders", adminOrderRoutes);
 app.use("/api/admin/customers", adminCustomerRoutes);
 app.use("/api/admin/featured", adminFeaturedRoutes);
 app.use("/api/featured", featuredRoutes);
+app.use("/api/admin/shipments", adminShipmentRoutes);
 
 app.get("/", (req, res) => {
   res.send("Zenkai Backend Running");

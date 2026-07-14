@@ -19,14 +19,17 @@ const getPagination = (page, limit) => {
 
 /**
  * Helper: Update product variant summary cache
+ * Now accepts optional session for transactional consistency
  */
-const updateProductVariantSummary = async (productId) => {
-  const variants = await ProductVariant.find({
-    productId,
-    isActive: true,
-  }).lean();
+const updateProductVariantSummary = async (productId, session = null) => {
+  const variants = await ProductVariant.find(
+    { productId, isActive: true },
+    null,
+    { session }, // Pass session if provided
+  ).lean();
 
   if (variants.length === 0) {
+    // Optionally reset summary? We'll just return.
     return;
   }
 
@@ -42,17 +45,21 @@ const updateProductVariantSummary = async (productId) => {
     isActive: v.isActive,
   }));
 
-  await Product.findByIdAndUpdate(productId, {
-    $set: {
-      variantSummary: {
-        minPrice: Math.min(...prices),
-        maxPrice: Math.max(...prices),
-        totalQuantity,
-        availableColors,
+  await Product.findByIdAndUpdate(
+    productId,
+    {
+      $set: {
+        variantSummary: {
+          minPrice: Math.min(...prices),
+          maxPrice: Math.max(...prices),
+          totalQuantity,
+          availableColors,
+        },
+        hasVariants: true,
       },
-      hasVariants: true,
     },
-  });
+    { session }, // Pass session
+  );
 };
 
 /**
@@ -561,4 +568,7 @@ router.get("/slug/:slug", async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = {
+  router,
+  updateProductVariantSummary,
+};
