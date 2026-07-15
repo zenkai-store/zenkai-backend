@@ -27,6 +27,8 @@ router.post("/", userAuth, async (req, res) => {
       pincode,
       addressType,
       isDefault,
+      latitude,
+      longitude,
     } = req.body;
 
     if (!fullName || !phone || !addressLine1 || !city || !state || !pincode)
@@ -52,6 +54,8 @@ router.post("/", userAuth, async (req, res) => {
       pincode,
       addressType,
       isDefault,
+      latitude,
+      longitude,
     });
 
     res.status(201).json({

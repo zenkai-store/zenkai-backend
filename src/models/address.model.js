@@ -51,6 +51,14 @@ const addressSchema = new mongoose.Schema(
       default: "India",
     },
 
+    latitude: {
+      type: Number,
+    },
+
+    longitude: {
+      type: Number,
+    },
+
     pincode: {
       type: String,
       required: true,
