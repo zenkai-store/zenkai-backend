@@ -33,7 +33,11 @@ const featuredRoutes = require("./routes/featured.routes");
 const adminShipmentRoutes = require("./routes/admin.shipment.routes");
 const userRoutes = require("./routes/user.routes");
 
+const cleanupPendingOrders = require("./jobs/cleanupPendingOrders");
+
 const app = express();
+
+cleanupPendingOrders();
 
 app.use(
   cors({

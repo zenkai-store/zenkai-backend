@@ -303,7 +303,7 @@ class OrderService {
     const skip = (page - 1) * limit;
 
     const [orders, total] = await Promise.all([
-      Order.find({ userId })
+      Order.find({ userId, paymentStatus: "paid" })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -311,7 +311,7 @@ class OrderService {
           "orderNumber totalAmount paymentStatus orderStatus createdAt items",
         )
         .lean(),
-      Order.countDocuments({ userId }),
+      Order.countDocuments({ userId, paymentStatus: "paid" }),
     ]);
 
     return {
