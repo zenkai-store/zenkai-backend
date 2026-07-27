@@ -11,6 +11,7 @@ require("./models/admin.model");
 require("./models/adminActivity.model");
 require("./models/category.model");
 require("./models/product.model");
+require("./models/counter.model");
 
 const authRoutes = require("./routes/auth.routes");
 const adminRoutes = require("./routes/admin.routes");

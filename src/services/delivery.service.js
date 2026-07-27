@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const Order = require("../models/order.model");
 const Shipment = require("../models/shipment.model");
 const ProductVariant = require("../models/productVariant.model");
+const { syncShipmentToSheet } = require("../services/erpSync.service");
 
 // ================================
 // SHIPROCKET CONFIGURATION
@@ -116,6 +117,14 @@ async function buildShiprocketPayload(
     hsn: "999999",
   }));
 
+  // ======================= FIXED DIMENSIONS & WEIGHT =======================
+  // Box size: 15 inches x 11 inches x 9 inches  →  convert to cm for Shiprocket
+  const LENGTH_CM = 38.1; // 15 in
+  const BREADTH_CM = 27.94; // 11 in
+  const HEIGHT_CM = 22.86; // 9 in
+  const WEIGHT_KG = 0.75; // 500g–1kg range, we use 0.75 kg
+  // ========================================================================
+
   // Calculate total weight – use default if missing
   let totalWeight = 0;
   let maxLength = 10,
@@ -161,10 +170,10 @@ async function buildShiprocketPayload(
     transaction_charges: 0,
     total: order.totalAmount,
     roundoff: 0,
-    length: maxLength,
-    breadth: maxWidth,
-    height: maxHeight,
-    weight: totalWeight || 1,
+    length: LENGTH_CM,
+    breadth: BREADTH_CM,
+    height: HEIGHT_CM,
+    weight: WEIGHT_KG,
   };
 }
 
@@ -305,6 +314,23 @@ async function createShipmentForOrder(orderId, userId = null) {
     await order.save({ session });
 
     await session.commitTransaction();
+
+    setImmediate(async () => {
+      try {
+        // Insert or update Delivery Sheet
+        await syncShipmentToSheet(shipment, order);
+        // Save shipment if new row number added
+        if (shipment.sheetRowNumber) {
+          await shipment.save(); // but we need to fetch fresh? Better to save inside sync function.
+        }
+        // Optionally update order with Shiprocket Order ID in Order Sheet
+        // We can call updateOrderRows after updating order.shiprocketOrderId
+        // But we already have the order object, we can update and save.
+      } catch (err) {
+        console.error(`Error syncing shipment ${shipment._id} to sheets:`, err);
+      }
+    });
+
     return shipment[0];
   } catch (error) {
     await session.abortTransaction();
@@ -361,6 +387,14 @@ async function updateTrackingStatus(awbCode) {
           { deliveryStatus: "delivered" },
         );
       }
+
+      const shipment = await Shipment.findOne({ awbCode });
+      if (shipment) {
+        const order = await Order.findById(shipment.orderId);
+        await syncShipmentToSheet(shipment, order);
+        await shipment.save(); // if sheetRowNumber updated
+      }
+
       return trackingData;
     }
   } catch (error) {

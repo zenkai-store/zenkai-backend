@@ -34,6 +34,7 @@ const shipmentSchema = new mongoose.Schema(
     shiprocketShipmentId: { type: String },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
     trackingDetails: { type: mongoose.Schema.Types.Mixed, default: {} },
+    sheetRowNumber: { type: Number },
   },
   { timestamps: true },
 );

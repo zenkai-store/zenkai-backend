@@ -5,6 +5,11 @@ const OrderStatusHistory = require("../models/orderStatusHistory.model");
 const ProductVariant = require("../models/productVariant.model");
 const CartService = require("./cart.service");
 const deliveryService = require("./delivery.service");
+const {
+  updateOrderRows,
+  syncTransactionToSheet,
+  syncOrderToSheet,
+} = require("../services/erpSync.service");
 
 class OrderService {
   /**
@@ -139,6 +144,33 @@ class OrderService {
       }
 
       await session.commitTransaction();
+
+      // Asynchronously sync to Google Sheets (fire and forget)
+      const orderId = order._id;
+      setImmediate(async () => {
+        try {
+          // Fetch the order again to ensure we have latest data (or use the existing order object)
+          const freshOrder = await Order.findById(orderId);
+          if (freshOrder) {
+            // Need address and user data
+            const Address = require("../models/address.model");
+            const address = await Address.findById(freshOrder.addressId);
+            const User = require("../models/user.model");
+            const user = await User.findById(freshOrder.userId);
+            await syncOrderToSheet(
+              freshOrder,
+              address,
+              user?.email,
+              user?.phone,
+            );
+            // Save the order to persist sheet row numbers
+            await freshOrder.save();
+          }
+        } catch (err) {
+          console.error(`Error syncing order ${orderId} to sheets:`, err);
+        }
+      });
+
       return {
         order,
         requiresPayment: true,
@@ -239,6 +271,18 @@ class OrderService {
       );
 
       await session.commitTransaction();
+
+      setImmediate(async () => {
+        try {
+          // Update order sheet rows
+          await updateOrderRows(order); // uses stored row numbers
+          // Insert transaction row
+          await syncTransactionToSheet(payment, order);
+          // Save payment if sheetRowNumber added (but not needed if we don't store it)
+        } catch (err) {
+          console.error(`Error syncing payment ${payment._id} to sheets:`, err);
+        }
+      });
 
       // Trigger shipment creation asynchronously (do not await to avoid delaying response)
       setImmediate(() => {

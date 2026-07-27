@@ -3,7 +3,7 @@ const crypto = require("crypto");
 require("dotenv").config();
 
 // Your order ID from create-order response
-const razorpayOrderId = "order_TDMHnh7OdGy6Oi";
+const razorpayOrderId = "order_TIXgzKJLzseEYB";
 
 // Generate a random test payment ID (follows Razorpay format)
 const razorpayPaymentId = "pay_" + Math.random().toString(36).substring(2, 15);

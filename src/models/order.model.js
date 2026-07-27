@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const Counter = require("./counter.model");
 
 const orderItemSchema = new mongoose.Schema({
   productId: {
@@ -40,6 +41,8 @@ const orderItemSchema = new mongoose.Schema({
     required: true,
     min: 0,
   },
+
+  sheetRowNumber: { type: Number },
 });
 
 const orderSchema = new mongoose.Schema(
@@ -177,6 +180,49 @@ const orderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+
+    // Shipment related fields
+    shipmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Shipment",
+    },
+
+    deliveryStatus: {
+      type: String,
+      enum: [
+        "pending",
+        "assigned",
+        "picked_up",
+        "in_transit",
+        "delivered",
+        "failed",
+      ],
+      default: "pending",
+    },
+
+    courierName: {
+      type: String,
+    },
+
+    awbCode: {
+      type: String,
+    },
+
+    shippedAt: {
+      type: Date,
+    },
+
+    userEmail: {
+      type: String,
+    },
+
+    userPhone: {
+      type: String,
+    },
+
+    shiprocketOrderId: {
+      type: String,
+    },
   },
   { timestamps: true },
 );
@@ -215,13 +261,32 @@ orderSchema.methods.canBeReturned = function () {
 
 // Pre-save middleware to generate order number
 orderSchema.pre("save", async function () {
-  if (!this.orderNumber) {
-    const year = new Date().getFullYear();
-    const month = String(new Date().getMonth() + 1).padStart(2, "0");
-    const Order = mongoose.model("Order");
-    const count = await Order.countDocuments();
+  // Only generate if orderNumber is not already set
+  if (this.orderNumber) return;
 
-    this.orderNumber = `ORD-${year}${month}-${String(count + 1).padStart(6, "0")}`;
+  const year = new Date().getFullYear();
+  const month = String(new Date().getMonth() + 1).padStart(2, "0");
+  const key = `order_${year}${month}`;
+
+  try {
+    // Atomically increment and get the new sequence number
+    const counterDoc = await Counter.findOneAndUpdate(
+      { _id: key },
+      { $inc: { sequence_value: 1 } },
+      { returnDocument: "after", upsert: true },
+    );
+
+    const seq = counterDoc.sequence_value;
+    this.orderNumber = `ORD-${year}${month}-${String(seq).padStart(6, "0")}`;
+  } catch (error) {
+    // Fallback: generate a unique number based on timestamp + random
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 6);
+    this.orderNumber = `ORD-${year}${month}-${timestamp}${random}`;
+    console.error(
+      "Counter increment failed, using fallback orderNumber:",
+      error.message,
+    );
   }
 });
 
@@ -247,6 +312,8 @@ orderSchema.index({ paymentStatus: 1, createdAt: -1 });
 
 // Special indexes
 orderSchema.index({ "items.variantId": 1 });
+orderSchema.index({ awbCode: 1 });
+orderSchema.index({ deliveryStatus: 1 });
 
 // Ensure virtuals are included
 orderSchema.set("toJSON", { virtuals: true });
