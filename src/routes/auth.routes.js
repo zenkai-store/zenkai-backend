@@ -9,11 +9,10 @@ const router = express.Router();
 
 // Cookie settings helper
 const setUserTokenCookie = (res, token) => {
-  const isProduction = process.env.NODE_ENV === "production";
   res.cookie("token", token, {
     httpOnly: true,
-    secure: isProduction, // true only in production
-    sameSite: isProduction ? "none" : "lax",
+    secure: true,
+    sameSite: "none",
     maxAge: 180 * 24 * 60 * 60 * 1000, // 6 months
   });
 };
@@ -99,11 +98,10 @@ router.get("/failure", (req, res) => {
 });
 
 router.post("/logout", (req, res) => {
-  const isProduction = process.env.NODE_ENV === "production";
   res.clearCookie("token", {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
+    secure: true,
+    sameSite: "none",
     path: "/",
   });
 
@@ -181,6 +179,7 @@ router.post("/signup", async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Signup successful",
+      user: { id: user._id, name: user.name, email: user.email, role: user.role },
     });
   } catch (err) {
     console.log("Signup error:", err);
@@ -236,6 +235,7 @@ router.post("/login", async (req, res) => {
     return res.json({
       success: true,
       message: "Login successful",
+      user: { id: user._id, name: user.name, email: user.email, role: user.role },
     });
   } catch (err) {
     console.log("Login error:", err);
