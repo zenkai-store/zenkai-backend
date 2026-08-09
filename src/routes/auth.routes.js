@@ -9,10 +9,11 @@ const router = express.Router();
 
 // Cookie settings helper
 const setUserTokenCookie = (res, token) => {
+  const isProduction = process.env.NODE_ENV === "production";
   res.cookie("token", token, {
     httpOnly: true,
-    secure: true,
-    sameSite: "none",
+    secure: isProduction,
+    sameSite: isProduction ? "lax" : "lax",
     maxAge: 180 * 24 * 60 * 60 * 1000, // 6 months
   });
 };
@@ -98,10 +99,11 @@ router.get("/failure", (req, res) => {
 });
 
 router.post("/logout", (req, res) => {
+  const isProduction = process.env.NODE_ENV === "production";
   res.clearCookie("token", {
     httpOnly: true,
-    secure: true,
-    sameSite: "none",
+    secure: isProduction,
+    sameSite: "lax",
     path: "/",
   });
 
