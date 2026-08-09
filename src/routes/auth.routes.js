@@ -117,7 +117,14 @@ router.post("/logout", (req, res) => {
  * CHECK AUTH
  */
 router.get("/me", (req, res) => {
-  const token = req.cookies.token;
+  let token = req.cookies.token;
+
+  if (!token) {
+    const authHeader = req.headers["authorization"];
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.slice(7);
+    }
+  }
 
   if (!token) return res.status(401).json({ message: "Not authenticated" });
 
@@ -181,6 +188,7 @@ router.post("/signup", async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Signup successful",
+      token,
       user: { id: user._id, name: user.name, email: user.email, role: user.role },
     });
   } catch (err) {
@@ -237,6 +245,7 @@ router.post("/login", async (req, res) => {
     return res.json({
       success: true,
       message: "Login successful",
+      token,
       user: { id: user._id, name: user.name, email: user.email, role: user.role },
     });
   } catch (err) {
