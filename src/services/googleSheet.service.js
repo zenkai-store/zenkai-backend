@@ -2,7 +2,9 @@
 const { google } = require("googleapis");
 
 class GoogleSheetsService {
-  constructor() {
+  _init() {
+    if (this.sheets) return; // already initialised
+
     this.spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
     if (!this.spreadsheetId) {
       throw new Error("GOOGLE_SHEETS_SPREADSHEET_ID is not defined");
@@ -30,6 +32,7 @@ class GoogleSheetsService {
    * @returns {Promise<number>} - The row number of the inserted row.
    */
   async appendRow(sheetName, values) {
+    this._init();
     try {
       const response = await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
@@ -74,6 +77,7 @@ class GoogleSheetsService {
    * @returns {Promise<void>}
    */
   async updateRow(sheetName, rowNumber, values) {
+    this._init();
     try {
       // Build range: e.g., "Order Sheet!A123:Z123"
       const range = `${sheetName}!A${rowNumber}:Z${rowNumber}`;
