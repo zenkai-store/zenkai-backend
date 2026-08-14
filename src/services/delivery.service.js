@@ -23,6 +23,14 @@ try {
   console.error("Invalid SHIPROCKET_PICKUP_ADDRESS JSON");
 }
 
+// ======================= FIXED DIMENSIONS & WEIGHT =======================
+// Box size: 15 inches x 11 inches x 9 inches  →  convert to cm for Shiprocket
+const LENGTH_CM = 38.1;  // 15 in
+const BREADTH_CM = 27.94; // 11 in
+const HEIGHT_CM = 22.86;  // 9 in
+const WEIGHT_KG = 0.75;   // default weight per shipment (kg)
+// =========================================================================
+
 // Token cache with expiry (240 hours = 10 days)
 let cachedToken = null;
 let tokenExpiry = null;
@@ -99,6 +107,68 @@ async function shiprocketRequest(method, endpoint, data = null) {
 }
 
 /**
+ * Fetch available couriers for a shipment and pick the best one by a
+ * composite score:  50% Shiprocket rating (reliability) + 50% cost savings.
+ * Returns the courier_id of the winner, or null to fall back to Shiprocket's
+ * default recommendation.
+ *
+ * Weight tuning (must sum to 1.0):
+ *   RATING_WEIGHT – how much delivery reliability matters
+ *   COST_WEIGHT   – how much lower price matters
+ */
+async function selectBestCourier(shipmentId, pickupPincode, deliveryPincode, weightKg) {
+  const RATING_WEIGHT = 0.5;
+  const COST_WEIGHT = 0.5;
+
+  try {
+    const params = new URLSearchParams({
+      pickup_postcode: pickupPincode,
+      delivery_postcode: deliveryPincode,
+      cod: 0,
+      weight: weightKg,
+    });
+
+    const data = await shiprocketRequest(
+      "GET",
+      `/courier/serviceability/?${params.toString()}`,
+    );
+
+    const couriers = data?.data?.available_courier_companies;
+    if (!couriers || couriers.length === 0) {
+      console.warn("No couriers returned by serviceability API, using Shiprocket default");
+      return null;
+    }
+
+    const rates = couriers.map((c) => c.rate);
+    const minRate = Math.min(...rates);
+    const maxRate = Math.max(...rates);
+    const rateRange = maxRate - minRate || 1; // avoid divide-by-zero
+
+    const scored = couriers.map((c) => {
+      const normalizedCost = (maxRate - c.rate) / rateRange; // 1 = cheapest, 0 = most expensive
+      const normalizedRating = (c.rating || 0) / 5;
+      const score = RATING_WEIGHT * normalizedRating + COST_WEIGHT * normalizedCost;
+      return { courier_id: c.courier_company_id, courier_name: c.courier_name, rate: c.rate, rating: c.rating, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    const best = scored[0];
+    console.log(
+      `✅ Selected courier "${best.courier_name}" (id: ${best.courier_id}) — ₹${best.rate}, rating: ${best.rating}, score: ${best.score.toFixed(3)}`,
+    );
+    console.log(
+      "All couriers scored:",
+      scored.map((c) => `${c.courier_name}: ₹${c.rate} rating=${c.rating} score=${c.score.toFixed(3)}`).join(" | "),
+    );
+
+    return best.courier_id;
+  } catch (err) {
+    console.error("Courier selection failed, falling back to Shiprocket default:", err.message);
+    return null;
+  }
+}
+
+/**
  * Build Shiprocket order payload from our order + address + items
  */
 // In delivery.service.js
@@ -116,14 +186,6 @@ async function buildShiprocketPayload(
     tax: 0,
     hsn: "999999",
   }));
-
-  // ======================= FIXED DIMENSIONS & WEIGHT =======================
-  // Box size: 15 inches x 11 inches x 9 inches  →  convert to cm for Shiprocket
-  const LENGTH_CM = 38.1; // 15 in
-  const BREADTH_CM = 27.94; // 11 in
-  const HEIGHT_CM = 22.86; // 9 in
-  const WEIGHT_KG = 0.75; // 500g–1kg range, we use 0.75 kg
-  // ========================================================================
 
   // Calculate total weight – use default if missing
   let totalWeight = 0;
@@ -234,13 +296,25 @@ async function createShipmentForOrder(orderId, userId = null) {
     const shiprocketOrderId = createOrderRes.order_id;
     const shiprocketShipmentId = createOrderRes.shipment_id;
 
-    // Step 2: Assign AWB
+    // Step 1.5: Pick the best courier by rating + cost instead of auto-recommended
+    const pickupPin = PICKUP_ADDRESS?.pin_code || PICKUP_ADDRESS?.pincode || "";
+    const deliveryPin = addressSnapshot.pincode;
+    const selectedCourierId = await selectBestCourier(
+      shiprocketShipmentId,
+      pickupPin,
+      deliveryPin,
+      WEIGHT_KG,
+    );
+
+    // Step 2: Assign AWB — pass courier_id if we found one, else let Shiprocket choose
+    const awbPayload = { shipment_id: shiprocketShipmentId };
+    if (selectedCourierId) {
+      awbPayload.courier_id = selectedCourierId;
+    }
     const assignAwbRes = await shiprocketRequest(
       "POST",
       "/courier/assign/awb",
-      {
-        shipment_id: shiprocketShipmentId,
-      },
+      awbPayload,
     );
     if (!assignAwbRes || !assignAwbRes.awb_code) {
       throw new Error("AWB assignment failed: " + JSON.stringify(assignAwbRes));
