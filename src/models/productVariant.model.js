@@ -14,8 +14,18 @@ const productVariantSchema = new mongoose.Schema(
     name: { type: String, required: true }, // Can be color specific name
 
     color: {
-      name: { type: String, required: true },
-      code: { type: String, required: true }, // Hex code or color identifier
+      name: { type: String, default: null },
+      code: { type: String, default: null }, // Hex code or color identifier
+    },
+
+    size: {
+      type: String,
+      enum: {
+        values: ["1:16", "1:24", "1:32", "1:64"],
+        message: "Size must be one of: 1:16, 1:24, 1:32, 1:64",
+      },
+      default: "1:24",
+      index: true,
     },
 
     media: [

@@ -14,9 +14,15 @@ const upload = require("../middleware/upload.middleware");
 
 const router = express.Router();
 
-/**
- * Helper: Update product variant summary cache
- */
+const VALID_SIZES = ["1:16", "1:24", "1:32", "1:64"];
+
+const getPagination = (page, limit) => {
+  const pageNum = Math.max(1, parseInt(page) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+  const skip = (pageNum - 1) * limitNum;
+  return { page: pageNum, limit: limitNum, skip };
+};
+
 const updateProductVariantSummary = async (productId, session = null) => {
   const variants = await ProductVariant.find(
     { productId, isActive: true },
@@ -35,11 +41,18 @@ const updateProductVariantSummary = async (productId, session = null) => {
   );
 
   const totalQuantity = variants.reduce((sum, v) => sum + v.quantity, 0);
-  const availableColors = variants.map((v) => ({
-    name: v.color.name,
-    code: v.color.code,
-    isActive: v.isActive && v.quantity > 0,
-  }));
+
+  const availableColors = variants
+    .filter((v) => v.color && v.color.name && v.color.code)
+    .map((v) => ({
+      name: v.color.name,
+      code: v.color.code,
+      isActive: v.isActive && v.quantity > 0,
+    }));
+
+  const availableSizes = [
+    ...new Set(variants.filter((v) => v.size).map((v) => v.size)),
+  ].filter((s) => VALID_SIZES.includes(s));
 
   const updateData = {
     variantSummary: {
@@ -47,6 +60,7 @@ const updateProductVariantSummary = async (productId, session = null) => {
       maxPrice: Math.max(...prices),
       totalQuantity,
       availableColors,
+      availableSizes,
     },
     hasVariants: true,
   };
@@ -60,12 +74,18 @@ const updateProductVariantSummary = async (productId, session = null) => {
 const validateVariantData = (variantData) => {
   const errors = [];
 
-  if (
-    !variantData.color ||
-    !variantData.color.name ||
-    !variantData.color.code
-  ) {
-    errors.push("Color name and code are required for variant");
+  // Color is optional but if provided, both name and code are required
+  if (variantData.color !== undefined && variantData.color !== null) {
+    if (!variantData.color.name || !variantData.color.code) {
+      errors.push("Color must include both name and code");
+    }
+  }
+
+  // Size is optional but if provided must be a valid value
+  if (variantData.size !== undefined && variantData.size !== null) {
+    if (!VALID_SIZES.includes(variantData.size)) {
+      errors.push(`Size must be one of: ${VALID_SIZES.join(", ")}`);
+    }
   }
 
   if (!variantData.pricing || !variantData.pricing.sellingPrice) {
@@ -141,6 +161,7 @@ const formatProductForListing = async (product) => {
           maxPrice: product.variantSummary.maxPrice,
         }
       : null,
+    availableSizes: product.variantSummary?.availableSizes || [],
   };
 };
 
@@ -338,9 +359,14 @@ router.post("/", adminAuth, upload.array("media", 10), async (req, res) => {
     const createdProduct = product[0];
 
     // Generate SKU if not provided
+    const colorPart =
+      variantData.color?.name
+        ? variantData.color.name.toUpperCase().replace(/\s+/g, "")
+        : "DEFAULT";
+    const sizePart = (variantData.size || "1:24").replace(":", "");
     const sku =
       variantData.sku ||
-      `${productId}-${variantData.color.name.toUpperCase().replace(/\s/g, "")}`;
+      `${productId}-${colorPart}-${sizePart}`;
 
     // Check SKU uniqueness
     const existingSku = await ProductVariant.findOne({ sku }).session(session);
@@ -352,14 +378,21 @@ router.post("/", adminAuth, upload.array("media", 10), async (req, res) => {
       });
     }
 
+    // Build variant name
+    const variantNameParts = [name];
+    if (variantData.color?.name) variantNameParts.push(variantData.color.name);
+    const variantSize = variantData.size || "1:24";
+    variantNameParts.push(variantSize);
+
     // Create default variant
     const variant = await ProductVariant.create(
       [
         {
           productId: createdProduct._id,
           sku: sku,
-          name: `${name} - ${variantData.color.name}`,
-          color: variantData.color,
+          name: variantNameParts.join(" - "),
+          color: variantData.color || null,
+          size: variantSize,
           media: variantData.media || mediaFiles,
           quantity: variantData.quantity || 0,
           pricing: variantData.pricing,
@@ -382,7 +415,7 @@ router.post("/", adminAuth, upload.array("media", 10), async (req, res) => {
         {
           adminId: req.admin.id,
           adminEmail: admin.email,
-          action: `CREATE_PRODUCT_WITH_VARIANT (${createdProduct.name} - ${variantData.color.name})`,
+          action: `CREATE_PRODUCT_WITH_VARIANT (${createdProduct.name} - ${variantData.color?.name || "No Color"} - ${variantSize})`,
           ipAddress: req.ip,
           userAgent: req.headers["user-agent"],
         },
@@ -490,9 +523,13 @@ router.post(
       const variantMedia = variantData.media || mediaFiles;
 
       // Generate SKU if not provided
+      const colorPart = variantData.color?.name
+        ? variantData.color.name.toUpperCase().replace(/\s+/g, "")
+        : "DEFAULT";
+      const sizePart = (variantData.size || "1:24").replace(":", "");
       const sku =
         variantData.sku ||
-        `${product.productId}-${variantData.color.name.toUpperCase().replace(/\s/g, "")}`;
+        `${product.productId}-${colorPart}-${sizePart}`;
 
       // Check SKU uniqueness
       const existingSku = await ProductVariant.findOne({ sku }).session(
@@ -506,20 +543,61 @@ router.post(
         });
       }
 
-      // Check if variant with same color already exists
-      const existingColor = await ProductVariant.findOne({
-        productId: product._id,
-        "color.name": variantData.color.name,
-        isActive: true,
-      }).session(session);
+      // Check if variant with same color AND size already exists (only when both are set)
+      if (variantData.color?.name && variantData.size) {
+        const existingColorSize = await ProductVariant.findOne({
+          productId: product._id,
+          "color.name": variantData.color.name,
+          size: variantData.size,
+          isActive: true,
+        }).session(session);
 
-      if (existingColor) {
-        await session.abortTransaction();
-        return res.status(400).json({
-          success: false,
-          message: `Variant with color "${variantData.color.name}" already exists`,
-        });
+        if (existingColorSize) {
+          await session.abortTransaction();
+          return res.status(400).json({
+            success: false,
+            message: `Variant with color "${variantData.color.name}" and size "${variantData.size}" already exists`,
+          });
+        }
+      } else if (variantData.color?.name) {
+        // Only color provided — check for duplicate color (no size)
+        const existingColorNoSize = await ProductVariant.findOne({
+          productId: product._id,
+          "color.name": variantData.color.name,
+          size: variantData.size || "1:24",
+          isActive: true,
+        }).session(session);
+
+        if (existingColorNoSize) {
+          await session.abortTransaction();
+          return res.status(400).json({
+            success: false,
+            message: `Variant with color "${variantData.color.name}" and size "${variantData.size || "1:24"}" already exists`,
+          });
+        }
+      } else if (variantData.size) {
+        // Only size provided — check for duplicate size with no color
+        const existingSizeNoColor = await ProductVariant.findOne({
+          productId: product._id,
+          color: { $in: [null, { name: null, code: null }] },
+          size: variantData.size,
+          isActive: true,
+        }).session(session);
+
+        if (existingSizeNoColor) {
+          await session.abortTransaction();
+          return res.status(400).json({
+            success: false,
+            message: `Variant with size "${variantData.size}" and no color already exists`,
+          });
+        }
       }
+
+      // Build variant name
+      const newVariantNameParts = [product.name];
+      if (variantData.color?.name) newVariantNameParts.push(variantData.color.name);
+      const newVariantSize = variantData.size || "1:24";
+      newVariantNameParts.push(newVariantSize);
 
       // Create variant
       const variant = await ProductVariant.create(
@@ -527,8 +605,9 @@ router.post(
           {
             productId: product._id,
             sku: sku,
-            name: `${product.name} - ${variantData.color.name}`,
-            color: variantData.color,
+            name: newVariantNameParts.join(" - "),
+            color: variantData.color || null,
+            size: newVariantSize,
             media: variantMedia,
             quantity: variantData.quantity || 0,
             pricing: variantData.pricing,
@@ -553,7 +632,7 @@ router.post(
           {
             adminId: req.admin.id,
             adminEmail: admin.email,
-            action: `ADD_VARIANT (${product.name} - ${variantData.color.name})`,
+            action: `ADD_VARIANT (${product.name} - ${variantData.color?.name || "No Color"} - ${newVariantSize})`,
             ipAddress: req.ip,
             userAgent: req.headers["user-agent"],
           },
@@ -716,7 +795,32 @@ router.put(
       }
 
       // Update variant fields
-      if (updateData.color) variant.color = updateData.color;
+      if (updateData.color !== undefined) {
+        if (updateData.color === null) {
+          variant.color = null;
+        } else if (updateData.color.name && updateData.color.code) {
+          variant.color = updateData.color;
+        } else {
+          await session.abortTransaction();
+          return res.status(400).json({
+            success: false,
+            message: "Color must include both name and code",
+          });
+        }
+      }
+      if (updateData.size !== undefined) {
+        if (updateData.size === null) {
+          variant.size = null;
+        } else if (!VALID_SIZES.includes(updateData.size)) {
+          await session.abortTransaction();
+          return res.status(400).json({
+            success: false,
+            message: `Size must be one of: ${VALID_SIZES.join(", ")}`,
+          });
+        } else {
+          variant.size = updateData.size;
+        }
+      }
       if (updateData.pricing) {
         // Merge pricing data to preserve existing fields not included in update
         variant.pricing = {

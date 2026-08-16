@@ -7,9 +7,8 @@ const Category = require("../models/category.model");
 
 const router = express.Router();
 
-/**
- * PAGINATION FUNCTION HELPER
- */
+const VALID_SIZES = ["1:16", "1:24", "1:32", "1:64"];
+
 const getPagination = (page, limit) => {
   const pageNum = Math.max(1, parseInt(page) || 1);
   const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
@@ -18,18 +17,17 @@ const getPagination = (page, limit) => {
 };
 
 /**
- * Helper: Update product variant summary cache
- * Now accepts optional session for transactional consistency
+ * Recomputes and persists the variant summary cache on a product.
+ * Accepts an optional Mongoose session for transactional consistency.
  */
 const updateProductVariantSummary = async (productId, session = null) => {
   const variants = await ProductVariant.find(
     { productId, isActive: true },
     null,
-    { session }, // Pass session if provided
+    { session },
   ).lean();
 
   if (variants.length === 0) {
-    // Optionally reset summary? We'll just return.
     return;
   }
 
@@ -39,11 +37,18 @@ const updateProductVariantSummary = async (productId, session = null) => {
       : v.pricing.sellingPrice,
   );
   const totalQuantity = variants.reduce((sum, v) => sum + v.quantity, 0);
-  const availableColors = variants.map((v) => ({
-    name: v.color.name,
-    code: v.color.code,
-    isActive: v.isActive,
-  }));
+
+  const availableColors = variants
+    .filter((v) => v.color && v.color.name && v.color.code)
+    .map((v) => ({
+      name: v.color.name,
+      code: v.color.code,
+      isActive: v.isActive,
+    }));
+
+  const availableSizes = [
+    ...new Set(variants.filter((v) => v.size).map((v) => v.size)),
+  ].filter((s) => VALID_SIZES.includes(s));
 
   await Product.findByIdAndUpdate(
     productId,
@@ -54,19 +59,16 @@ const updateProductVariantSummary = async (productId, session = null) => {
           maxPrice: Math.max(...prices),
           totalQuantity,
           availableColors,
+          availableSizes,
         },
         hasVariants: true,
       },
     },
-    { session }, // Pass session
+    { session },
   );
 };
 
-/**
- * Helper: Format product for listing with variant info
- */
 const formatProductForListing = async (product) => {
-  // Get cheapest variant for listing display
   const cheapestVariant = await ProductVariant.findOne({
     productId: product._id,
     isActive: true,
@@ -76,14 +78,11 @@ const formatProductForListing = async (product) => {
     .lean();
 
   let variantImage = null;
-  if (
-    cheapestVariant &&
-    cheapestVariant.media &&
-    cheapestVariant.media.length
-  ) {
+  if (cheapestVariant?.media?.length) {
     const imageItem = cheapestVariant.media.find((m) => m.type === "image");
     if (imageItem) {
       variantImage = {
+        variantId: cheapestVariant._id,
         url: imageItem.url,
         type: "image",
       };
@@ -104,33 +103,30 @@ const formatProductForListing = async (product) => {
           maxPrice: product.variantSummary.maxPrice,
         }
       : null,
+    availableSizes: product.variantSummary?.availableSizes || [],
   };
 };
 
 /**
- * GET: /api/products
- * PAGINATED LIST OF ALL ACTIVE PRODUCTS
+ * GET /api/products
  */
 router.get("/", async (req, res) => {
   try {
     const { page, limit } = req.query;
     const { page: pageNum, limit: limitNum, skip } = getPagination(page, limit);
 
-    const query = { isActive: true };
-
     const [products, total] = await Promise.all([
-      Product.find(query)
+      Product.find({ isActive: true })
         .populate("categories", "name slug")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
         .lean(),
-      Product.countDocuments(query),
+      Product.countDocuments({ isActive: true }),
     ]);
 
-    // Format products with variant information
     const formattedProducts = await Promise.all(
-      products.map((product) => formatProductForListing(product)),
+      products.map((p) => formatProductForListing(p)),
     );
 
     const totalPages = Math.ceil(total / limitNum);
@@ -154,8 +150,7 @@ router.get("/", async (req, res) => {
 });
 
 /**
- * GET: /api/products/:id/variants
- * FETCH ALL VARIANTS FOR A SPECIFIC PRODUCT
+ * GET /api/products/:id/variants
  */
 router.get("/:id/variants", async (req, res) => {
   try {
@@ -177,11 +172,7 @@ router.get("/:id/variants", async (req, res) => {
       .sort({ displayOrder: 1, isDefault: -1 })
       .lean();
 
-    res.json({
-      success: true,
-      data: variants,
-      count: variants.length,
-    });
+    res.json({ success: true, data: variants, count: variants.length });
   } catch (err) {
     console.error("Error fetching product variants: ", err);
     res.status(500).json({ success: false, message: err.message });
@@ -189,8 +180,7 @@ router.get("/:id/variants", async (req, res) => {
 });
 
 /**
- * GET: /api/products/:id/variants/:variantId
- * FETCH SPECIFIC VARIANT
+ * GET /api/products/:id/variants/:variantId
  */
 router.get("/:id/variants/:variantId", async (req, res) => {
   try {
@@ -206,10 +196,7 @@ router.get("/:id/variants/:variantId", async (req, res) => {
         .json({ success: false, message: "Variant not found" });
     }
 
-    res.json({
-      success: true,
-      data: variant,
-    });
+    res.json({ success: true, data: variant });
   } catch (err) {
     console.error("Error fetching variant: ", err);
     res.status(500).json({ success: false, message: err.message });
@@ -217,8 +204,7 @@ router.get("/:id/variants/:variantId", async (req, res) => {
 });
 
 /**
- * POST: /api/products/:id/variants
- * ADD NEW VARIANT TO EXISTING PRODUCT
+ * POST /api/products/:id/variants
  */
 router.post("/:id/variants", async (req, res) => {
   const session = await mongoose.startSession();
@@ -235,11 +221,28 @@ router.post("/:id/variants", async (req, res) => {
         .json({ success: false, message: "Product not found" });
     }
 
-    const { color, sku, pricing, quantity, media, isDefault, displayOrder } =
+    const { color, size, sku, pricing, quantity, media, isDefault, displayOrder } =
       req.body;
 
-    // Check if SKU already exists
-    const existingSku = await ProductVariant.findOne({ sku }).session(session);
+    // Validate size if provided
+    if (size !== undefined && size !== null && !VALID_SIZES.includes(size)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Size must be one of: ${VALID_SIZES.join(", ")}`,
+      });
+    }
+
+    const variantSize = size || "1:24";
+
+    const colorPart = color?.name
+      ? color.name.toUpperCase().replace(/\s+/g, "")
+      : "DEFAULT";
+    const sizePart = variantSize.replace(":", "");
+    const generatedSku = sku || `${product.productId}-${colorPart}-${sizePart}`;
+
+    const existingSku = await ProductVariant.findOne({ sku: generatedSku }).session(session);
     if (existingSku) {
       await session.abortTransaction();
       session.endSession();
@@ -248,7 +251,6 @@ router.post("/:id/variants", async (req, res) => {
         .json({ success: false, message: "SKU already exists" });
     }
 
-    // If this variant is set as default, unset other defaults
     if (isDefault) {
       await ProductVariant.updateMany(
         { productId: product._id },
@@ -257,11 +259,16 @@ router.post("/:id/variants", async (req, res) => {
       );
     }
 
+    const nameParts = [product.name];
+    if (color?.name) nameParts.push(color.name);
+    nameParts.push(variantSize);
+
     const variant = new ProductVariant({
       productId: product._id,
-      sku: sku || `${product.productId}-${color.name.toUpperCase()}`,
-      name: `${product.name} - ${color.name}`,
-      color,
+      sku: generatedSku,
+      name: nameParts.join(" - "),
+      color: color || null,
+      size: variantSize,
       pricing,
       quantity: quantity || 0,
       media: media || [],
@@ -271,10 +278,7 @@ router.post("/:id/variants", async (req, res) => {
     });
 
     await variant.save({ session });
-
-    // Update product variant summary
-    await updateProductVariantSummary(product._id);
-
+    await updateProductVariantSummary(product._id, session);
     await session.commitTransaction();
     session.endSession();
 
@@ -292,8 +296,7 @@ router.post("/:id/variants", async (req, res) => {
 });
 
 /**
- * PUT: /api/products/:id/variants/:variantId
- * UPDATE EXISTING VARIANT
+ * PUT /api/products/:id/variants/:variantId
  */
 router.put("/:id/variants/:variantId", async (req, res) => {
   const session = await mongoose.startSession();
@@ -313,17 +316,19 @@ router.put("/:id/variants/:variantId", async (req, res) => {
         .json({ success: false, message: "Variant not found" });
     }
 
-    const {
-      color,
-      pricing,
-      quantity,
-      media,
-      isActive,
-      isDefault,
-      displayOrder,
-    } = req.body;
+    const { color, size, pricing, quantity, media, isActive, isDefault, displayOrder } =
+      req.body;
 
-    // If this variant is set as default, unset other defaults
+    // Validate size if provided
+    if (size !== undefined && size !== null && !VALID_SIZES.includes(size)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Size must be one of: ${VALID_SIZES.join(", ")}`,
+      });
+    }
+
     if (isDefault) {
       await ProductVariant.updateMany(
         { productId: variant.productId, _id: { $ne: variant._id } },
@@ -332,9 +337,25 @@ router.put("/:id/variants/:variantId", async (req, res) => {
       );
     }
 
-    // Update variant fields
-    if (color) variant.color = color;
-    if (pricing) variant.pricing = pricing;
+    if (color !== undefined) variant.color = color || null;
+    if (size !== undefined) variant.size = size || null;
+    if (pricing) {
+      variant.pricing = {
+        costPrice: pricing.costPrice ?? variant.pricing.costPrice ?? 0,
+        marginalPrice: pricing.marginalPrice ?? variant.pricing.marginalPrice ?? 0,
+        marketPrice:
+          pricing.marketPrice ??
+          variant.pricing.marketPrice ??
+          variant.pricing.sellingPrice ??
+          0,
+        sellingPrice: pricing.sellingPrice ?? variant.pricing.sellingPrice ?? 0,
+        onSalePrice:
+          pricing.onSalePrice !== undefined
+            ? pricing.onSalePrice
+            : (variant.pricing.onSalePrice ?? null),
+      };
+      variant.markModified("pricing");
+    }
     if (quantity !== undefined) variant.quantity = quantity;
     if (media) variant.media = media;
     if (isActive !== undefined) variant.isActive = isActive;
@@ -345,10 +366,7 @@ router.put("/:id/variants/:variantId", async (req, res) => {
     variant.updatedAt = new Date();
 
     await variant.save({ session });
-
-    // Update product variant summary
-    await updateProductVariantSummary(variant.productId);
-
+    await updateProductVariantSummary(variant.productId, session);
     await session.commitTransaction();
     session.endSession();
 
@@ -366,8 +384,7 @@ router.put("/:id/variants/:variantId", async (req, res) => {
 });
 
 /**
- * DELETE: /api/products/:id/variants/:variantId
- * DELETE VARIANT (SOFT DELETE)
+ * DELETE /api/products/:id/variants/:variantId
  */
 router.delete("/:id/variants/:variantId", async (req, res) => {
   const session = await mongoose.startSession();
@@ -387,21 +404,14 @@ router.delete("/:id/variants/:variantId", async (req, res) => {
         .json({ success: false, message: "Variant not found" });
     }
 
-    // Soft delete
     variant.isActive = false;
     variant.updatedBy = req.user?._id;
     await variant.save({ session });
-
-    // Update product variant summary
-    await updateProductVariantSummary(variant.productId);
-
+    await updateProductVariantSummary(variant.productId, session);
     await session.commitTransaction();
     session.endSession();
 
-    res.json({
-      success: true,
-      message: "Variant deleted successfully",
-    });
+    res.json({ success: true, message: "Variant deleted successfully" });
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -411,8 +421,7 @@ router.delete("/:id/variants/:variantId", async (req, res) => {
 });
 
 /**
- * GET: /api/products/search
- * FUZZY SEARCH ACROSS PRODUCTS AND VARIANTS
+ * GET /api/products/search
  */
 router.get("/search", async (req, res) => {
   try {
@@ -424,34 +433,27 @@ router.get("/search", async (req, res) => {
     }
 
     const { page: pageNum, limit: limitNum, skip } = getPagination(page, limit);
-
     const searchRegex = new RegExp(q, "i");
 
-    // Search in products
     const productQuery = {
       isActive: true,
-      $or: [
-        { name: searchRegex },
-        { slug: searchRegex },
-        { productId: searchRegex },
-      ],
+      $or: [{ name: searchRegex }, { slug: searchRegex }, { productId: searchRegex }],
     };
 
-    // Also search in variants
-    const variants = await ProductVariant.find({
+    const matchedVariantProductIds = await ProductVariant.find({
       isActive: true,
       $or: [
         { sku: searchRegex },
         { name: searchRegex },
         { "color.name": searchRegex },
+        { size: searchRegex },
       ],
     })
       .distinct("productId")
       .lean();
 
-    // Combine product queries
     const finalQuery = {
-      $or: [productQuery, { _id: { $in: variants } }],
+      $or: [productQuery, { _id: { $in: matchedVariantProductIds } }],
     };
 
     const [products, total] = await Promise.all([
@@ -465,7 +467,7 @@ router.get("/search", async (req, res) => {
     ]);
 
     const formattedProducts = await Promise.all(
-      products.map((product) => formatProductForListing(product)),
+      products.map((p) => formatProductForListing(p)),
     );
 
     const totalPages = Math.ceil(total / limitNum);
@@ -489,8 +491,7 @@ router.get("/search", async (req, res) => {
 });
 
 /**
- * GET: /api/products/:id
- * FETCH A SINGLE ACTIVE PRODUCT WITH ITS VARIANTS
+ * GET /api/products/:id
  */
 router.get("/:id", async (req, res) => {
   try {
@@ -507,7 +508,6 @@ router.get("/:id", async (req, res) => {
         .json({ success: false, message: "Product not found" });
     }
 
-    // Fetch all active variants
     const variants = await ProductVariant.find({
       productId: product._id,
       isActive: true,
@@ -515,13 +515,7 @@ router.get("/:id", async (req, res) => {
       .sort({ displayOrder: 1, isDefault: -1 })
       .lean();
 
-    res.json({
-      success: true,
-      data: {
-        ...product,
-        variants,
-      },
-    });
+    res.json({ success: true, data: { ...product, variants } });
   } catch (err) {
     console.error("Error in fetching product by id: ", err);
     res.status(500).json({ success: false, message: err.message });
@@ -529,8 +523,7 @@ router.get("/:id", async (req, res) => {
 });
 
 /**
- * GET: /api/products/slug/:slug
- * FETCH A SINGLE ACTIVE PRODUCT BY SLUG WITH VARIANTS
+ * GET /api/products/slug/:slug
  */
 router.get("/slug/:slug", async (req, res) => {
   try {
@@ -547,7 +540,6 @@ router.get("/slug/:slug", async (req, res) => {
         .json({ success: false, message: "Product not found" });
     }
 
-    // Fetch all active variants
     const variants = await ProductVariant.find({
       productId: product._id,
       isActive: true,
@@ -555,13 +547,7 @@ router.get("/slug/:slug", async (req, res) => {
       .sort({ displayOrder: 1, isDefault: -1 })
       .lean();
 
-    res.json({
-      success: true,
-      data: {
-        ...product,
-        variants,
-      },
-    });
+    res.json({ success: true, data: { ...product, variants } });
   } catch (err) {
     console.error("Error in fetching product by slug: ", err);
     res.status(500).json({ success: false, message: err.message });

@@ -26,6 +26,8 @@ const optionalAuth = (req, res, next) => {
   next();
 };
 
+const VALID_SIZES = ["1:16", "1:24", "1:32", "1:64"];
+
 /**
  * PAGINATION FUNCTION HELPER
  */
@@ -55,11 +57,16 @@ const updateProductVariantSummary = async (productId) => {
       : v.pricing.sellingPrice,
   );
   const totalQuantity = variants.reduce((sum, v) => sum + v.quantity, 0);
-  const availableColors = variants.map((v) => ({
-    name: v.color.name,
-    code: v.color.code,
-    isActive: v.isActive,
-  }));
+  const availableColors = variants
+    .filter((v) => v.color && v.color.name && v.color.code)
+    .map((v) => ({
+      name: v.color.name,
+      code: v.color.code,
+      isActive: v.isActive,
+    }));
+  const availableSizes = [
+    ...new Set(variants.filter((v) => v.size).map((v) => v.size)),
+  ].filter((s) => VALID_SIZES.includes(s));
 
   await Product.findByIdAndUpdate(productId, {
     $set: {
@@ -68,6 +75,7 @@ const updateProductVariantSummary = async (productId) => {
         maxPrice: Math.max(...prices),
         totalQuantity,
         availableColors,
+        availableSizes,
       },
       hasVariants: true,
     },
@@ -128,8 +136,9 @@ const formatProductForListing = async (
           maxPrice: product.variantSummary.maxPrice,
         }
       : null,
-    averageReview, //✅ added
-    isWishlisted, // ✅ added
+    availableSizes: product.variantSummary?.availableSizes || [],
+    averageReview,
+    isWishlisted,
   };
 };
 
@@ -612,13 +621,14 @@ router.get("/search", async (req, res) => {
       ],
     };
 
-    // Also search in variants
+    // Also search in variants (by SKU, name, color, or size)
     const variants = await ProductVariant.find({
       isActive: true,
       $or: [
         { sku: searchRegex },
         { name: searchRegex },
         { "color.name": searchRegex },
+        { size: searchRegex },
       ],
     })
       .distinct("productId")
@@ -954,6 +964,15 @@ router.get("/category/:categoryId", async (req, res) => {
               }
             : null;
 
+          // Collect unique sizes across all active variants
+          const availableSizes = [
+            ...new Set(
+              activeVariants
+                .filter((v) => v.size && VALID_SIZES.includes(v.size))
+                .map((v) => v.size),
+            ),
+          ];
+
           // Safe description truncation
           let truncatedDescription = null;
           if (product.description && typeof product.description === "string") {
@@ -982,6 +1001,7 @@ router.get("/category/:categoryId", async (req, res) => {
             quantity: totalQuantity,
             stockStatus,
             variantCount: activeVariants.length,
+            availableSizes,
             categories: product.categories,
             hasVariants: product.hasVariants || false,
             isOnSale: defaultVariant?.isOnSale || false,

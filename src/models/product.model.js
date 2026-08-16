@@ -21,6 +21,12 @@ const productSchema = new mongoose.Schema(
           isActive: Boolean,
         },
       ],
+      availableSizes: [
+        {
+          type: String,
+          enum: ["1:16", "1:24", "1:32", "1:64"],
+        },
+      ],
     },
 
     categories: [
