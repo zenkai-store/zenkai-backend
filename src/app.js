@@ -32,6 +32,7 @@ const adminCustomerRoutes = require("./routes/admin.customer.routes");
 const adminFeaturedRoutes = require("./routes/admin.featured.routes");
 const featuredRoutes = require("./routes/featured.routes");
 const adminShipmentRoutes = require("./routes/admin.shipment.routes");
+const adminDeliveryRequestRoutes = require("./routes/admin.deliveryRequest.routes");
 const userRoutes = require("./routes/user.routes");
 
 const cleanupPendingOrders = require("./jobs/cleanupPendingOrders");
@@ -86,6 +87,7 @@ app.use("/api/admin/customers", adminCustomerRoutes);
 app.use("/api/admin/featured", adminFeaturedRoutes);
 app.use("/api/featured", featuredRoutes);
 app.use("/api/admin/shipments", adminShipmentRoutes);
+app.use("/api/admin/delivery-requests", adminDeliveryRequestRoutes);
 app.use("/api/user", userRoutes);
 
 app.get("/", (req, res) => {

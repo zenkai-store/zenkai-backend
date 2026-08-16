@@ -91,7 +91,11 @@ router.post("/:id/retry", adminAuth, async (req, res) => {
         });
 
     const admin = await Admin.findById(req.admin.id);
-    const newShipment = await deliveryService.retryShipment(shipment._id);
+    const retryResult = await deliveryService.retryShipment(shipment._id);
+
+    // retryResult is { routed: "auto", shipment } | { routed: "admin", deliveryRequest, reason }
+    const newShipmentId =
+      retryResult.routed === "auto" ? retryResult.shipment?._id : null;
 
     await AdminActivity.create({
       adminId: req.admin.id,
@@ -99,13 +103,21 @@ router.post("/:id/retry", adminAuth, async (req, res) => {
       action: "RETRY_SHIPMENT",
       ipAddress: req.ip,
       userAgent: req.headers["user-agent"],
-      details: { oldShipmentId: shipment._id, newShipmentId: newShipment._id },
+      details: {
+        oldShipmentId: shipment._id,
+        newShipmentId,
+        routed: retryResult.routed,
+        reason: retryResult.reason || null,
+      },
     });
 
     res.json({
       success: true,
-      message: "Shipment retry initiated",
-      data: newShipment,
+      message:
+        retryResult.routed === "auto"
+          ? "Shipment retry placed automatically"
+          : "Shipment retry routed to admin for manual placement",
+      data: retryResult,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
