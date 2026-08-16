@@ -33,10 +33,6 @@ router.get("/", adminAuth, async (req, res) => {
       page = 1,
       limit = 20,
       search,
-      role,
-      isActive,
-      startDate,
-      endDate,
       sortBy = "createdAt",
       sortOrder = "desc",
     } = req.query;
@@ -44,82 +40,94 @@ router.get("/", adminAuth, async (req, res) => {
     const parsedPage = Math.max(1, parseInt(page));
     const parsedLimit = Math.min(100, Math.max(1, parseInt(limit)));
 
-    // Build query
-    const query = {};
+    // Build match stage
+    const matchStage = {};
 
-    // Search functionality
     if (search) {
-      const searchRegex = new RegExp(search, "i");
-      query.$or = [
+      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      matchStage.$or = [
         { name: searchRegex },
         { email: searchRegex },
         { phone: searchRegex },
       ];
     }
 
-    // Filter by role
-    if (role) {
-      query.role = role;
-    }
+    // Allowed sort fields to prevent injection
+    const allowedSortFields = ["createdAt", "name", "email", "orderCount", "totalSpent"];
+    const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
+    const safeSortOrder = sortOrder === "asc" ? 1 : -1;
 
-    // Filter by active status
-    if (isActive !== undefined) {
-      query.isActive = isActive === "true";
-    }
+    // Aggregation pipeline: join orders, compute orderCount + totalSpent, paginate
+    const pipeline = [
+      { $match: matchStage },
 
-    // Filter by date range
-    if (startDate || endDate) {
-      query.createdAt = {};
-
-      if (startDate) {
-        query.createdAt.$gte = new Date(startDate);
-      }
-
-      if (endDate) {
-        // Set to end of day
-        const endDateTime = new Date(endDate);
-        endDateTime.setHours(23, 59, 59, 999);
-        query.createdAt.$lte = endDateTime;
-      }
-    }
-
-    // Build sort object
-    const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === "asc" ? 1 : -1;
-
-    // Get total count for pagination
-    const total = await User.countDocuments(query);
-
-    // Fetch users with selected fields only (excluding sensitive data)
-    const users = await User.find(query)
-      .select("-password -__v")
-      .sort(sortOptions)
-      .skip((parsedPage - 1) * parsedLimit)
-      .limit(parsedLimit)
-      .lean();
-
-    // Get admin details for activity logging
-    const admin = await Admin.findById(req.admin.id).select("email");
-    if (!admin) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid admin credentials",
-      });
-    }
-
-    // Log admin activity
-    await AdminActivity.create({
-      adminId: req.admin.id,
-      adminEmail: admin.email,
-      action: "LIST_CUSTOMERS",
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
-      details: {
-        filters: { search, role, isActive, startDate, endDate },
-        page: parsedPage,
-        limit: parsedLimit,
+      // Join orders for this user
+      {
+        $lookup: {
+          from: "orders",
+          let: { userId: "$_id" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$userId", "$$userId"] } } },
+            {
+              $group: {
+                _id: null,
+                orderCount: { $sum: 1 },
+                totalSpent: {
+                  $sum: {
+                    $cond: [{ $eq: ["$paymentStatus", "paid"] }, "$totalAmount", 0],
+                  },
+                },
+              },
+            },
+          ],
+          as: "orderStats",
+        },
       },
-    });
+
+      // Flatten orderStats array into scalar fields
+      {
+        $addFields: {
+          orderCount: { $ifNull: [{ $arrayElemAt: ["$orderStats.orderCount", 0] }, 0] },
+          totalSpent: { $ifNull: [{ $arrayElemAt: ["$orderStats.totalSpent", 0] }, 0] },
+        },
+      },
+
+      { $unset: ["orderStats", "password", "__v"] },
+
+      // Total count facet + paginated results in one round-trip
+      {
+        $facet: {
+          metadata: [{ $count: "total" }],
+          data: [
+            { $sort: { [safeSortBy]: safeSortOrder } },
+            { $skip: (parsedPage - 1) * parsedLimit },
+            { $limit: parsedLimit },
+          ],
+        },
+      },
+    ];
+
+    const [result] = await User.aggregate(pipeline);
+
+    const total = result.metadata[0]?.total ?? 0;
+    const users = result.data;
+
+    // Log activity (non-blocking)
+    Admin.findById(req.admin.id)
+      .select("email")
+      .then((admin) => {
+        if (admin) {
+          AdminActivity.create({
+            adminId: req.admin.id,
+            adminEmail: admin.email,
+            action: "LIST_CUSTOMERS",
+            ipAddress: req.ip,
+            userAgent: req.headers["user-agent"],
+            details: { filters: { search }, page: parsedPage, limit: parsedLimit },
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
 
     return res.json({
       success: true,
