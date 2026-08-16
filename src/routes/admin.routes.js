@@ -28,13 +28,11 @@ router.post("/login", async (req, res) => {
       { expiresIn: "24h" },
     );
 
+    const isProduction = process.env.NODE_ENV === "production";
     res.cookie("adminToken", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
-
-      //secure: false,     // ✅ changed
-      //sameSite: "lax",  // ✅ changed
+      secure: isProduction,
+      sameSite: "lax",
       maxAge: 24 * 60 * 60 * 1000,
     });
 
@@ -47,7 +45,7 @@ router.post("/login", async (req, res) => {
       userAgent: req.headers["user-agent"],
     });
 
-    res.json({ message: "Admin logged in successfully" });
+    res.json({ message: "Admin logged in successfully", token });
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
@@ -73,7 +71,12 @@ router.post("/logout", async (req, res) => {
       userAgent: req.headers["user-agent"],
     });
 
-    res.clearCookie("adminToken");
+    const isProduction = process.env.NODE_ENV === "production";
+    res.clearCookie("adminToken", {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+    });
     res.json({ message: "Admin logged out successfully" });
   } catch (err) {
     console.error("Logout error:", err);
